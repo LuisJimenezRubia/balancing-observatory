@@ -3,6 +3,8 @@
 
 Cada descarga queda en  data/bronze/entsoe/<dataset>/area=<AREA>/<dia=AAAA-MM-DD | mes=AAAA-MM>/respuesta.<xml|zip>[.gz]
 y se anota en         data/bronze/_registro_cargas.jsonl  (una línea JSON por descarga).
+Si ENTSO-E rechaza una ventana por exceder su límite de documentos por petición (pasa con las reservas contratadas
+por meses), la ventana se parte en dos mitades (carpeta rango=AAAA-MM-DD_AAAA-MM-DD) hasta que cabe.
 
 El "día" es el día de mercado en hora de Bruselas (00:00–24:00 locales). Los datasets, áreas y parámetros vienen del
 catálogo explorado el 14-15/11/2026 (docs/conceptos-balance.md, sección 8). Rasgos de esta ingesta:
@@ -135,7 +137,7 @@ def descargar(url, intentos=4, timeout=180):
                 return r.status, r.read()
         except urllib.error.HTTPError as e:
             cuerpo = e.read()
-            if e.code in (429, 500, 502, 503, 504) and intento < intentos:
+            if e.code in (429, 500, 502, 503, 504, 599) and intento < intentos:
                 time.sleep(60 if e.code == 429 else espera * intento)   # 429: límite por minuto de ENTSO-E
                 continue
             return e.code, cuerpo
@@ -172,6 +174,9 @@ def leer_registro():
             e = json.loads(linea)
             if e.get("fichero"):
                 estados[e["fichero"]] = e["estado"]
+            if e["estado"] == "dividido":   # ventana demasiado grande para la API: ir directo a las mitades
+                estados[f"{e['dataset']}/{e['area']}/{e['dia_mercado']}_{e['dia_mercado_fin']}"] = "dividido"
+
     return estados
 
 
@@ -233,6 +238,22 @@ def analizar(cuerpo):
     return "ok", es_zip, series, puntos, ""
 
 
+def motivo_rechazo(cuerpo):
+    """Texto del motivo (Reason/text) de un Acknowledgement de error; si no es XML, el principio del cuerpo."""
+    try:
+        raiz = ET.fromstring(cuerpo)
+        return " ".join(el.text.strip() for el in raiz.iter() if _local(el) == "text" and el.text)
+    except ET.ParseError:
+        return cuerpo[:200].decode("utf-8", "replace")
+
+
+def mitades(dia_ini, dia_fin):
+    """Parte una ventana de varios días en dos; cada mitad con su etiqueta de carpeta."""
+    medio = dia_ini + (dia_fin - dia_ini) // 2
+    for a, b in ((dia_ini, medio), (medio + dt.timedelta(days=1), dia_fin)):
+        yield (f"dia={a.isoformat()}" if a == b else f"rango={a.isoformat()}_{b.isoformat()}"), a, b
+
+
 # ---------------------------------------------------------------- carga
 
 def cargar(dataset, area, ventana, token, forzar, estados):
@@ -242,6 +263,11 @@ def cargar(dataset, area, ventana, token, forzar, estados):
     candidatos = [ruta(dataset, area, etiqueta, z, gz) for z in (False, True)]
     if not forzar and any(estados.get(str(c.relative_to(RAIZ))) in ("ok", "sin_datos") for c in candidatos):
         print(f"  = {dataset}/{area} {etiqueta} · ya estaba")
+        return
+    clave_ventana = f"{dataset}/{area}/{dia_ini.isoformat()}_{dia_fin.isoformat()}"
+    if estados.get(clave_ventana) == "dividido":   # ya se sabe que esta ventana excede el límite de la API
+        for mitad in mitades(dia_ini, dia_fin):
+            cargar(dataset, area, mitad, token, forzar, estados)
         return
     inicio, fin = ventana_utc(dia_ini)[0], ventana_utc(dia_fin)[1]
     q = {"securityToken": token, **params, param_area: AREAS[area],
@@ -253,7 +279,13 @@ def cargar(dataset, area, ventana, token, forzar, estados):
         estado, es_zip, series, puntos, detalle = analizar(cuerpo)
     else:
         estado, es_zip, series, puntos = "error", False, 0, 0
-        detalle = f"HTTP {codigo}: {cuerpo[:200].decode('utf-8', 'replace')}"
+        detalle = f"HTTP {codigo}: {motivo_rechazo(cuerpo)}"
+        # ENTSO-E limita el nº de documentos por petición (400 "exceeds allowed limit"): se parte la ventana en dos
+        if codigo == 400 and dia_fin > dia_ini and ("exceeds" in detalle or "allowed" in detalle):
+            estado = "dividido"
+        # los datasets a 4 s a veces revientan por dentro en ENTSO-E ("I/O error") con un mes entero: probar con menos
+        elif dataset in PESADOS and dia_fin > dia_ini and "I/O error" in detalle:
+            estado = "dividido"
     fichero = ruta(dataset, area, etiqueta, es_zip, gz)
     if estado in ("ok", "sin_datos"):
         fichero.parent.mkdir(parents=True, exist_ok=True)
@@ -267,10 +299,13 @@ def cargar(dataset, area, ventana, token, forzar, estados):
         "fichero": str(fichero.relative_to(RAIZ)) if estado in ("ok", "sin_datos") else None,
         "duracion_s": round(time.time() - t0, 1), "detalle": detalle[:300],
     })
-    simbolo = {"ok": "✓", "sin_datos": "·", "error": "✗"}[estado]
+    simbolo = {"ok": "✓", "sin_datos": "·", "error": "✗", "dividido": "÷"}[estado]
     print(f"  {simbolo} {dataset}/{area} {etiqueta} · {estado} · {series} series · {puntos} puntos · "
           f"{len(cuerpo):,} bytes · {time.time() - t0:.0f} s" + (f" · {detalle[:120]}" if estado != "ok" and detalle else ""))
     time.sleep(0.5)   # ENTSO-E permite 400 peticiones/minuto; aquí no pasamos de ~20
+    if estado == "dividido":
+        for mitad in mitades(dia_ini, dia_fin):
+            cargar(dataset, area, mitad, token, forzar, estados)
 
 
 # ---------------------------------------------------------------- principal
