@@ -145,7 +145,7 @@ propios. La EB GL (2017) obligó a crear plataformas comunes, una por producto, 
   desde junio de 2022 (Alemania, Austria y Chequia primero; Bélgica, Países Bajos, Francia, Italia y otros
   después). La aloja TransnetBW.
 - **MARI** (Manually Activated Reserves Initiative): lo mismo para la **energía mFRR**, con activaciones programadas
-  y directas y clearing cada cuarto de hora. En operación desde octubre de 2022. Elia se conectó en mayo de 2024.
+  y directas y clearing cada cuarto de hora. En operación desde octubre de 2022. Elia se conectó en mayo de 2025 y TenneT NL en diciembre de 2025.
 - **TERRE**: lo mismo para RR, desde 2020, con menos TSO.
 
 Las tres usan la capacidad de interconexión que queda libre tras los mercados day-ahead e intradía, en este orden:
@@ -344,8 +344,11 @@ Peculiaridades técnicas encontradas:
 
 - Áreas: BE, NL, FR, AT, CZ, DK1, DK2 y Alemania (precio de desvío por país; balance por área de control 50Hertz,
   TenneT, TransnetBW; Amprion no publica A84).
-- Ventana: CBMP desde junio 2022 (arranque de PICASSO) donde exista; el resto, un año (oct 2025 - oct 2026), como
-  en grid-lakehouse.
+- Ventana (revisada 15/11/2026): precios y volúmenes de desvío, neteo, reservas, precios de activación y ofertas
+  agregadas desde enero de 2023, porque la comparación antes/después de la adhesión necesita historia previa
+  (NL y DK entraron en PICASSO en oct 2024, BE en nov 2024, FR en abr 2025) y estos datasets pesan pocos KB por día;
+  CBMP e intercambio aFRR (4 s) primero los últimos 12 meses y después hacia atrás hasta junio de 2022 por tandas;
+  previsiones, un año (oct 2025 - oct 2026), como en grid-lakehouse.
 - Datasets: A85, A86, A84 (A16, A67, A68), A24 (A47, A51, A60, A61), A81, B17 (A63 y A51); y A69 (A01), A74,
   A65 (A01, A16) para la previsión. A87, A15, B17 mFRR y las previsiones intradía quedan para una fase 2.
 - Stack y estructura iguales que grid-lakehouse: bronze crudo con log de carga y ventana de revisión (2 días para

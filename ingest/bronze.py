@@ -49,7 +49,8 @@ try:  # certificados del llavero de macOS (antivirus o VPN que inspeccionan http
     import truststore
     truststore.inject_into_ssl()
 except ImportError:
-    pass
+    print("Aviso: truststore no está instalado en este entorno; si hay un antivirus o proxy que inspecciona https, "
+          "todas las descargas fallarán con CERTIFICATE_VERIFY_FAILED. Arreglo: pip install truststore", file=sys.stderr)
 
 RAIZ = Path(__file__).resolve().parent.parent
 BRONZE = RAIZ / "data" / "bronze"
