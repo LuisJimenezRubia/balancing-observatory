@@ -1,0 +1,5 @@
+technology,technology_name,psr_type,business_type,source_document
+wind_onshore,Wind onshore,B19,A93,A69/A74
+wind_offshore,Wind offshore,B18,A93,A69/A74
+solar,Solar,B16,A94,A69/A74
+load,Total load,,A04,A65

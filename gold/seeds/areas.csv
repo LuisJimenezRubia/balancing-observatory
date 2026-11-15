@@ -1,0 +1,14 @@
+area,eic_code,area_name,country_code,tso,area_type,imbalance_price_area,picasso_since,mari_since,is_core,accession_note
+BE,10YBE----------2,Belgium,BE,ELIA,control_area,BE,2024-11-28,2025-05-21,true,PICASSO date from ENTSO-E accession note (verify go-live day in CBMP data); MARI per ENTSO-E MESC Feb 2026
+NL,10YNL----------L,Netherlands,NL,TENNETBV,control_area,NL,2024-10-02,2025-12-02,true,PICASSO October 2024 jointly with Energinet (exact day to verify in CBMP data); MARI per ENTSO-E MESC Feb 2026
+FR,10YFR-RTE------C,France,FR,RTE,control_area,FR,2025-04-02,,true,PICASSO April 2025; MARI accession expected 2026 - date to confirm
+AT,10YAT-APG------L,Austria,AT,APG,control_area,AT,2022-06-22,2023-06-20,true,PICASSO first exchange 22/06/2022 with the German TSOs; MARI per ENTSO-E
+CZ,10YCZ-CEPS-----N,Czech Republic,CZ,CEPS,control_area,CZ,2022-06-01,2022-10-05,true,First TSO on PICASSO (go-live) and MARI (go-live)
+DK1,10YDK-1--------W,Denmark West,DK,ENERGINET,bidding_zone,DK1,2024-10-02,,false,Not on MARI; the Nordic mFRR energy activation market (04/03/2025) is a separate market
+DK2,10YDK-2--------M,Denmark East,DK,ENERGINET,bidding_zone,DK2,2024-10-02,,false,Initially connected via the Great Belt link; not on MARI
+DE_50HZ,10YDE-VE-------2,Germany 50Hertz,DE,50HERTZ,control_area,DE,2022-06-22,2022-10-05,true,
+DE_AMPRION,10YDE-RWENET---I,Germany Amprion,DE,AMPRION,control_area,DE,2022-06-22,2022-10-05,true,
+DE_TENNET,10YDE-EON------1,Germany TenneT,DE,TENNETGMBH,control_area,DE,2022-06-22,2022-10-05,true,
+DE_TRANSNETBW,10YDE-ENBW-----N,Germany TransnetBW,DE,TRANSNETBW,control_area,DE,2022-06-22,2022-10-05,true,
+DE,10Y1001A1001A83F,Germany,DE,,country,DE,2022-06-22,2022-10-05,true,Country EIC: only code under which the reBAP imbalance price is published
+DE_LU,10Y1001A1001A82H,Germany-Luxembourg,DE,,bidding_zone,DE,,,true,Bidding zone: forecasts and load only

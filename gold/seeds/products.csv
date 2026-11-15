@@ -1,0 +1,5 @@
+product,product_name,platform,full_activation_min,business_type,process_type
+FCR,Frequency Containment Reserve,FCR Cooperation,0.5,A95,A52
+aFRR,automatic Frequency Restoration Reserve,PICASSO,5,A96,A51
+mFRR,manual Frequency Restoration Reserve,MARI,12.5,A97,A47
+RR,Replacement Reserve,TERRE,30,A98,A46

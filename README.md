@@ -3,7 +3,7 @@
 A medallion lakehouse on **public European balancing-market data** from the ENTSO-E Transparency Platform:
 imbalance prices and volumes, PICASSO cross-border marginal prices (4-second resolution), activated balancing
 energy, contracted reserves, imbalance netting and cross-border aFRR exchanges, plus day-ahead wind, solar and
-load forecasts against actuals. Ten areas: BE, NL, FR, AT, CZ, DK1, DK2 and the German control areas.
+load forecasts against actuals. Eleven balancing areas: BE, NL, FR, AT, CZ, DK1, DK2 and the four German control areas (Germany has a single imbalance price).
 
 Built locally at zero cost with Python, Delta Lake, DuckDB and dbt; designed to run on Microsoft Fabric.
 Companion to [grid-lakehouse](https://github.com/LuisJimenezRubia/grid-lakehouse), which covers day-ahead prices,

@@ -15,7 +15,7 @@ vars:
   revision_days: 7                   # días recientes que la ingesta vuelve a descargar: aún pueden cambiar
   # Convergencia del CBMP (mart_monthly_cbmp_convergence)
   cbmp_convergence_eur_mwh: 1        # dos zonas con VWAP 15 min a menos de esto se consideran convergentes
-  cbmp_reference_zone: "DE_50Hz"     # zona de referencia para medir el spread
+  cbmp_reference_zone: "DE_50HZ"     # zona de referencia para medir el spread
   # Precios extremos (cbmp_extreme_share)
   cbmp_extreme_low_eur_mwh: -500
   cbmp_extreme_high_eur_mwh: 1000
