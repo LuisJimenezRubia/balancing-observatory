@@ -1,0 +1,37 @@
+name: balancing_observatory
+version: "0.1.0"
+config-version: 2
+profile: balancing_observatory
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+vars:
+  # Carpeta de datos, relativa a gold/ (desde donde se ejecuta dbt)
+  data_dir: "../data"
+  silver_format: "delta"
+  revision_days: 7                   # días recientes que la ingesta vuelve a descargar: aún pueden cambiar
+  # Convergencia del CBMP (mart_monthly_cbmp_convergence)
+  cbmp_convergence_eur_mwh: 1        # dos zonas con VWAP 15 min a menos de esto se consideran convergentes
+  cbmp_reference_zone: "DE_50Hz"     # zona de referencia para medir el spread
+  # Precios extremos (cbmp_extreme_share)
+  cbmp_extreme_low_eur_mwh: -500
+  cbmp_extreme_high_eur_mwh: 1000
+
+models:
+  balancing_observatory:
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: gold
+
+seeds:
+  balancing_observatory:
+    +schema: reference
+
+flags:
+  send_anonymous_usage_stats: false

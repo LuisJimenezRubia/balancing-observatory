@@ -1,0 +1,10 @@
+balancing_observatory:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: ../data/gold/balancing.duckdb
+      extensions: [delta]
+      settings:
+        TimeZone: UTC
+      threads: 4
