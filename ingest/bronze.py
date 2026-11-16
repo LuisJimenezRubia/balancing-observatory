@@ -256,6 +256,49 @@ def mitades(dia_ini, dia_fin):
 
 # ---------------------------------------------------------------- carga
 
+def cargar_dia_largo(dataset, area, ventana, token, url_original, t0):
+    """Día de 25 h (cambio de hora de octubre) en un dataset limitado a 24 h por petición: dos peticiones, las
+    primeras 24 h y la hora que sobra, guardadas como respuesta.<ext> y respuesta_parte2.<ext> en la misma carpeta.
+    Silver lee todos los respuesta* de la carpeta. Se anota una sola línea: ok solo si las dos partes lo son."""
+    params, param_area, _, _, gz = DATASETS[dataset]
+    etiqueta, dia, _ = ventana
+    inicio, fin = ventana_utc(dia)
+    corte = inicio + dt.timedelta(hours=24)
+    partes = []
+    for a, b in ((inicio, corte), (corte, fin)):
+        q = {"securityToken": token, **params, param_area: AREAS[area],
+             "periodStart": a.strftime("%Y%m%d%H%M"), "periodEnd": b.strftime("%Y%m%d%H%M")}
+        codigo, cuerpo = descargar(f"{ENTSOE_URL}?{urllib.parse.urlencode(q)}")
+        if codigo == 200:
+            partes.append((cuerpo, *analizar(cuerpo)))
+        else:
+            partes.append((cuerpo, "error", False, 0, 0, f"HTTP {codigo}: {motivo_rechazo(cuerpo)}"))
+        time.sleep(0.5)
+    estados_partes = [p[1] for p in partes]
+    estado = "error" if "error" in estados_partes else ("ok" if "ok" in estados_partes else "sin_datos")
+    series, puntos = sum(p[3] for p in partes), sum(p[4] for p in partes)
+    detalle = "día de 25 h en 2 partes" + ("" if estado != "error" else
+                                         " · " + " | ".join(p[5] for p in partes if p[1] == "error"))
+    fichero = ruta(dataset, area, etiqueta, partes[0][2], gz)
+    if estado != "error":
+        fichero.parent.mkdir(parents=True, exist_ok=True)
+        for n, (cuerpo, *_rest) in enumerate(partes, start=1):
+            destino = fichero if n == 1 else fichero.with_name(fichero.name.replace("respuesta.", "respuesta_parte2.", 1))
+            destino.write_bytes(gzip.compress(cuerpo) if gz else cuerpo)
+    anotar({
+        "cargado_en": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "fuente": "entsoe", "dataset": dataset, "area": area,
+        "dia_mercado": dia.isoformat(), "dia_mercado_fin": dia.isoformat(),
+        "url": sin_token(url_original), "http": 200 if estado != "error" else 400, "estado": estado,
+        "series": series, "puntos": puntos, "bytes": sum(len(p[0]) for p in partes),
+        "sha256": hashlib.sha256(b"".join(p[0] for p in partes)).hexdigest(),
+        "fichero": str(fichero.relative_to(RAIZ)) if estado != "error" else None,
+        "duracion_s": round(time.time() - t0, 1), "detalle": detalle[:300],
+    })
+    simbolo = {"ok": "✓", "sin_datos": "·", "error": "✗"}[estado]
+    print(f"  {simbolo} {dataset}/{area} {etiqueta} · {estado} · {series} series · {puntos} puntos · {detalle[:120]}")
+
+
 def cargar(dataset, area, ventana, token, forzar, estados):
     params, param_area, _, _, gz = DATASETS[dataset]
     etiqueta, dia_ini, dia_fin = ventana
@@ -286,6 +329,9 @@ def cargar(dataset, area, ventana, token, forzar, estados):
         # los datasets a 4 s a veces revientan por dentro en ENTSO-E ("I/O error") con un mes entero: probar con menos
         elif dataset in PESADOS and dia_fin > dia_ini and "I/O error" in detalle:
             estado = "dividido"
+        # B17 aFRR admite como mucho 24 h por petición; el día del cambio de hora de octubre tiene 25 h
+        elif codigo == 400 and dia_fin == dia_ini and "must not span more than 1 day" in detalle:
+            return cargar_dia_largo(dataset, area, ventana, token, url, t0)
     fichero = ruta(dataset, area, etiqueta, es_zip, gz)
     if estado in ("ok", "sin_datos"):
         fichero.parent.mkdir(parents=True, exist_ok=True)
