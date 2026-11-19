@@ -1,0 +1,18 @@
+version: 2
+
+seeds:
+  - name: forecast_comparability
+    description: >
+      Zone and technology combinations whose published forecast and actual values do not cover the same
+      perimeter, with the reason. Anything not listed is comparable.
+    config:
+      column_types: {is_comparable: boolean}
+    tests:
+      - unique_combination: {arguments: {columns: [area, technology]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('areas'), field: area}}}]
+      - name: technology
+        tests: [not_null, {relationships: {arguments: {to: ref('technologies'), field: technology}}}]
+      - name: reason
+        tests: [not_null]

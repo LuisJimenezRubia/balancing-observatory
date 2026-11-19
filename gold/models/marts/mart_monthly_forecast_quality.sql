@@ -6,6 +6,8 @@ select
     f.area,
     f.technology,
     f.month,
+    any_value(f.is_comparable)                      as is_comparable,
+    any_value(f.comparability_note)                 as comparability_note,
     count(*)                                        as hours,
     avg(f.actual_mw)                                as mean_actual_mw,
     avg(f.abs_error_mw)                             as mae_mw,

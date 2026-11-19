@@ -3,6 +3,8 @@ select
     area,
     technology,
     hour_local,
+    any_value(is_comparable)                          as is_comparable,
+    any_value(comparability_note)                     as comparability_note,
     count(*)                                          as hours,
     avg(actual_mw)                                    as mean_actual_mw,
     avg(abs_error_mw)                                 as mae_mw,

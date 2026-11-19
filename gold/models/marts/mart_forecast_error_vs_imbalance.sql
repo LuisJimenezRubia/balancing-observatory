@@ -4,7 +4,8 @@
 --     Positivo = sobra energía respecto a lo previsto el día antes, lo que empuja al sistema a quedar largo.
 --   corr_error_imbalance  correlación con el desvío del sistema (positivo = largo): cuanto más alta, más pesa
 --     el error de previsión day-ahead en el desvío. No es causalidad: el intradiario corrige parte del error.
--- Solo horas con todas las tecnologías de la zona y el desvío disponibles. La zona DE_LU se compara con el
+-- Solo series comparables (fct_forecast_error.is_comparable) y solo horas con todas las tecnologías
+-- comparables de la zona y el desvío disponibles. La zona DE_LU se compara con el
 -- área de precio DE.
 with error_hora as (
     select
@@ -15,6 +16,7 @@ with error_hora as (
         count(*) as technologies
     from {{ ref('fct_forecast_error') }} f
     join {{ ref('areas') }} a on a.area = f.area
+    where f.is_comparable      -- solo series con el mismo perímetro en previsión y real
     group by 1, 2
 ),
 tecnologias_zona as (

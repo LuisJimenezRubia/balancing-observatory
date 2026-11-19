@@ -1,0 +1,6 @@
+area,technology,is_comparable,reason
+NL,solar,false,"Actual generation published for NL covers only part of the installed solar capacity (about 55 MW on average) while the forecast covers all of it: the difference is a perimeter gap, not a forecast error"
+NL,wind_onshore,false,"Actual generation published for NL covers a different perimeter than the forecast (normalised bias around -57 %)"
+NL,wind_offshore,false,"Actual generation published for NL covers a different perimeter than the forecast (normalised bias around +70 %)"
+NL,load,false,"Actual load is about 15 % above the day-ahead forecast every month: forecast and actual do not cover the same perimeter"
+DK1,wind_offshore,false,"Actual generation is about 33 % above the forecast on average: suspected perimeter mismatch between forecast and actual (not confirmed)"

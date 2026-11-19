@@ -78,6 +78,11 @@ models:
         tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
       - name: error_mw
         tests: [not_null]
+      - name: is_comparable
+        description: >
+          False when forecast and actual do not cover the same perimeter at the source (seed
+          forecast_comparability). Benchmark visuals must filter on it; the data-quality page shows the rest.
+        tests: [not_null]
   - name: mart_monthly_forecast_quality
     description: Monthly MAE, bias, RMSE and normalised MAE of the day-ahead forecast per zone and technology.
     tests:
