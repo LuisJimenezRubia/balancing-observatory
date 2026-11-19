@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: stg_fx_rate
+    description: ECB euro reference rate per currency and business day (currency units per euro).
+    tests:
+      - unique_combination: {arguments: {columns: [currency, rate_date]}}
+    columns:
+      - name: units_per_eur
+        tests: [not_null]
+  - name: stg_imbalance_price
+    description: >
+      Imbalance price per area and quarter-hour in EUR/MWh, surplus and deficit sides as columns. Coarser source
+      resolutions are spread over their quarter-hours; CZK prices are converted with the ECB reference rate.
+    tests:
+      - unique_combination: {arguments: {columns: [area, interval_start_utc]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('areas'), field: area}}}]
+      - name: source_resolution
+        tests: [{accepted_values: {arguments: {values: [PT15M, PT30M, PT60M]}}}]
+      - name: source_currency
+        tests: [{accepted_values: {arguments: {values: [EUR, CZK]}}}]
+  - name: stg_imbalance_volume
+    description: >
+      Signed system imbalance per control area and quarter-hour in MWh (positive = system long, negative = system
+      short). Coarser source resolutions are split evenly over their quarter-hours.
+    tests:
+      - unique_combination: {arguments: {columns: [area, interval_start_utc]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('areas'), field: area}}}]
+      - name: system_imbalance_mwh
+        tests: [not_null]

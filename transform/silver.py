@@ -10,6 +10,7 @@ Tablas (quedan por añadir reservas, precios de activación, ofertas agregadas y
   entsoe_wind_solar_actual    generación real eólica y solar por zona                              (A75)
   entsoe_load_forecast        previsión day-ahead de carga por zona                                (A65 + A01)
   entsoe_load_actual          carga real por zona                                                  (A65 + A16)
+  ecb_fx_rate                 tipo de cambio de referencia del BCE, unidades de moneda por euro    (ingest/fx.py)
 
 Reglas (comprobadas con los datos, ver docs/conceptos-balance.md):
   - Todo en UTC; cada fila lleva su día de mercado (hora de Bruselas) y el año, que es la partición.
@@ -27,6 +28,7 @@ Uso (desde la carpeta del proyecto, con el entorno virtual activado):
 """
 import argparse
 import calendar
+import csv
 import datetime as dt
 import gzip
 import io
@@ -266,6 +268,24 @@ TABLAS = {
 }
 
 
+def construir_fx(bronze, silver, raiz, ahora):
+    """Tipos de cambio del BCE (CSV de ingest/fx.py) → ecb_fx_rate. Solo hay valor los días hábiles."""
+    filas = []
+    for f in sorted((bronze / "ecb" / "exr").glob("currency=*/respuesta.csv")):
+        with f.open(encoding="utf-8", newline="") as fh:
+            for r in csv.DictReader(fh):
+                if r["OBS_VALUE"]:
+                    dia = dt.date.fromisoformat(r["TIME_PERIOD"])
+                    filas.append({"currency": r["CURRENCY"], "rate_date": dia, "market_year": dia.year,
+                                  "units_per_eur": float(r["OBS_VALUE"]),
+                                  "source_file": str(f.relative_to(raiz)), "loaded_at": ahora})
+    esquema = pa.schema([("currency", pa.string()), ("rate_date", pa.date32()), ("market_year", pa.int32()),
+                         ("units_per_eur", pa.float64())] + TRAZA)
+    ins, act = guardar(silver, "ecb_fx_rate", filas, esquema, ["currency", "rate_date"])
+    print(f"  ecb_fx_rate: {ins:,} insertadas, {act:,} actualizadas"
+          + ("" if filas else " · no hay datos: ejecuta antes python3 ingest/fx.py"))
+
+
 def construir(nombre, bronze, silver, raiz, desde, hasta, ahora):
     dataset, generador, esquema, clave = TABLAS[nombre]
     tabla = f"entsoe_{nombre}"
@@ -311,14 +331,17 @@ def main():
     p = argparse.ArgumentParser(description="Bronze → silver (Delta tables)")
     p.add_argument("--start", dest="desde", metavar="DATE", type=dt.date.fromisoformat, help="first market day, YYYY-MM-DD")
     p.add_argument("--end", dest="hasta", metavar="DATE", type=dt.date.fromisoformat, help="last market day, YYYY-MM-DD (inclusive)")
-    p.add_argument("--only", dest="solo", choices=sorted(TABLAS), nargs="+", help="build only these tables")
+    p.add_argument("--only", dest="solo", choices=sorted([*TABLAS, "fx_rate"]), nargs="+", help="build only these tables")
     p.add_argument("--data-dir", dest="datos", type=Path, default=RAIZ / "data", help="data folder (default: ./data)")
     p.add_argument("--silver-dir", dest="silver", type=Path, help="write silver here instead of <data-dir>/silver")
     a = p.parse_args()
     bronze, silver = a.datos / "bronze", a.silver or a.datos / "silver"
     ahora = dt.datetime.now(UTC)
     print("Construyendo silver…")
-    coberturas = {n: construir(n, bronze, silver, RAIZ, a.desde, a.hasta, ahora) for n in (a.solo or TABLAS)}
+    nombres = a.solo or [*TABLAS, "fx_rate"]
+    coberturas = {n: construir(n, bronze, silver, RAIZ, a.desde, a.hasta, ahora) for n in nombres if n in TABLAS}
+    if "fx_rate" in nombres:
+        construir_fx(bronze, silver, RAIZ, ahora)
     print("\nCobertura (por cuartos de hora del día de mercado):")
     for n, c in coberturas.items():
         informe_cobertura(n, c)

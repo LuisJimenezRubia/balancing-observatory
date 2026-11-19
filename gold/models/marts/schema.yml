@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: dim_area
+    description: Areas with TSO, imbalance-price area and PICASSO / MARI accession dates.
+    columns:
+      - name: area
+        tests: [unique, not_null]
+      - name: area_type
+        tests: [{accepted_values: {arguments: {values: [control_area, bidding_zone, country]}}}]
+  - name: dim_date
+    description: One row per market day (Brussels time); quarters_in_day is 92, 96 or 100 on clock-change days.
+    columns:
+      - name: market_date
+        tests: [unique, not_null]
+      - name: quarters_in_day
+        tests: [not_null, {accepted_values: {arguments: {values: [92, 96, 100], quote: false}}}]
+  - name: fct_imbalance
+    description: >
+      Imbalance price (EUR/MWh) and signed system imbalance (MWh, positive = long) per imbalance-price area and
+      quarter-hour. Germany is one price area; its volume is the sum of the four control areas.
+    tests:
+      - unique_combination: {arguments: {columns: [area, interval_start_utc]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
+      - name: market_date
+        tests: [{relationships: {arguments: {to: ref('dim_date'), field: market_date}}}]
+      - name: imbalance_price_eur_mwh
+        tests: [not_null]
+  - name: mart_monthly_imbalance_cost
+    description: >
+      Monthly imbalance price level, tail and imbalance-weighted price per area, with months since the TSO
+      joined PICASSO and MARI.
+    tests:
+      - unique_combination: {arguments: {columns: [area, month]}}
+    columns:
+      - name: mean_price_eur_mwh
+        tests: [not_null]

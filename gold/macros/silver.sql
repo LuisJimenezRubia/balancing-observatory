@@ -16,3 +16,8 @@
 {% macro hora_bruselas(col) -%}
   timezone('Europe/Brussels', {{ col }})
 {%- endmacro %}
+
+{#- Nº de cuartos de hora que cubre una fila según su resolución de origen. -#}
+{% macro cuartos(col) -%}
+  case {{ col }} when 'PT15M' then 1 when 'PT30M' then 2 when 'PT60M' then 4 end
+{%- endmacro %}
