@@ -37,3 +37,27 @@ models:
     columns:
       - name: mean_price_eur_mwh
         tests: [not_null]
+  - name: fct_cbmp_15min
+    description: >
+      aFRR CBMP per price area, direction and quarter-hour — mean, min, max and standard deviation over the
+      4-second cycles that carry a price, and the share of cycles that do.
+    tests:
+      - unique_combination: {arguments: {columns: [area, direction, interval_start_utc]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
+      - name: activation_share
+        tests: [not_null]
+  - name: fct_cbmp_convergence_15min
+    description: >
+      Per quarter-hour, in how many 4-second cycles an area and the reference area both have a CBMP, in how many
+      of those it is identical, and how far apart they are otherwise.
+    tests:
+      - unique_combination: {arguments: {columns: [area, reference_area, direction, interval_start_utc]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
+  - name: mart_monthly_cbmp_convergence
+    description: Monthly cycle-weighted CBMP convergence with the reference area, per area and direction.
+    tests:
+      - unique_combination: {arguments: {columns: [area, reference_area, direction, month]}}

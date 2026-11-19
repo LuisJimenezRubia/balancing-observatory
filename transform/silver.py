@@ -10,12 +10,18 @@ Tablas (quedan por añadir reservas, precios de activación, ofertas agregadas y
   entsoe_wind_solar_actual    generación real eólica y solar por zona                              (A75)
   entsoe_load_forecast        previsión day-ahead de carga por zona                                (A65 + A01)
   entsoe_load_actual          carga real por zona                                                  (A65 + A16)
+  entsoe_cbmp_15min           CBMP de aFRR (PICASSO) agregado de 4 s a 15 min por área y sentido     (A84 + A67)
+  entsoe_cbmp_convergence_15min  convergencia del CBMP con el área de referencia, medida ciclo a ciclo (4 s)
+                              y resumida por cuarto de hora                                        (A84 + A67)
   ecb_fx_rate                 tipo de cambio de referencia del BCE, unidades de moneda por euro    (ingest/fx.py)
 
 Reglas (comprobadas con los datos, ver docs/conceptos-balance.md):
   - Todo en UTC; cada fila lleva su día de mercado (hora de Bruselas) y el año, que es la partición.
   - curveType A03: ENTSO-E omite las posiciones cuyo valor se repite. Se rellenan con el último valor del mismo
     Period, nunca con 0 y nunca cruzando de un Period a otro.
+  - El CBMP se publica cada 4 s y solo trae precio, no volumen: se agrega a 15 min con media, mínimo, máximo y
+    desviación sobre los ciclos que tienen precio (un punto sin precio significa que en ese sentido no hubo
+    activación), y se guarda cuántos de los 225 ciclos lo tenían.
   - Se conserva la resolución original (15, 30 o 60 min según área y año); gold la lleva a 15 min.
   - Un mismo intervalo puede estar en varios ficheros de bronze (mes, quincena partida, día suelto, día vuelto a
     descargar en la ventana de revisión): gana el descargado más tarde, que es la versión ya revisada por el TSO.
@@ -76,7 +82,7 @@ def lotes(bronze, dataset, desde, hasta):
     Mes, quincenas partidas y días sueltos del mismo mes caen en el mismo lote.
     """
     grupos = defaultdict(list)
-    for f in (bronze / "entsoe" / dataset).glob("area=*/*=*/respuesta.*"):
+    for f in (bronze / "entsoe" / dataset).glob("area=*/*=*/respuesta*"):
         ini, fin = ventana(f.parent.name)
         if (desde is None or fin >= desde) and (hasta is None or ini <= hasta):
             grupos[(ini.year, ini.month)].append((f.stat().st_mtime, str(f), f.parent.parent.name.split("=", 1)[1], f))
@@ -199,6 +205,39 @@ def filas_volumen_desvio(area, fichero, ahora, raiz):
 ESQUEMA_VOLUMEN = pa.schema(COMUNES + [("direction", pa.string()), ("imbalance_mwh", pa.float64()),
                                        ("unit", pa.string())] + TRAZA)
 
+def filas_cbmp(area, fichero, ahora, raiz):
+    """A84 + A67. Precio marginal transfronterizo de aFRR, un valor por ciclo de optimización de 4 s y sentido
+    (A01 al alza, A02 a la baja). Se agrega a cuartos de hora sobre los ciclos con precio."""
+    for xml in documentos(fichero):
+        for attrs, res, puntos in series(xml):
+            sentido = SENTIDO.get(attrs.get("flowDirection.direction"), attrs.get("flowDirection.direction"))
+            cuartos = {}     # inicio del cuarto de hora → [ciclos, ciclos con precio, suma, suma de cuadrados, mín, máx]
+            for ts, p in puntos:
+                c = cuartos.setdefault(ts.replace(minute=ts.minute - ts.minute % 15, second=0), [0, 0, 0.0, 0.0, None, None])
+                c[0] += 1
+                precio = p.get("activation_Price.amount")
+                if precio is not None:
+                    v = float(precio)
+                    c[1] += 1
+                    c[2] += v
+                    c[3] += v * v
+                    c[4] = v if c[4] is None else min(c[4], v)
+                    c[5] = v if c[5] is None else max(c[5], v)
+            for ts, (n, con_precio, suma, suma2, minimo, maximo) in cuartos.items():
+                media = suma / con_precio if con_precio else None
+                yield (area, sentido, ts), {
+                    **base(area, ts, "PT15M", fichero, ahora, raiz), "direction": sentido,
+                    "cbmp_mean_eur_mwh": media, "cbmp_min_eur_mwh": minimo, "cbmp_max_eur_mwh": maximo,
+                    "cbmp_std_eur_mwh": max(suma2 / con_precio - media * media, 0.0) ** 0.5 if con_precio else None,
+                    "cycles_with_price": con_precio, "cycles_total": n, "source_resolution": res}
+
+
+ESQUEMA_CBMP = pa.schema(COMUNES + [("direction", pa.string())]
+                         + [(c, pa.float64()) for c in ("cbmp_mean_eur_mwh", "cbmp_min_eur_mwh", "cbmp_max_eur_mwh",
+                                                        "cbmp_std_eur_mwh")]
+                         + [("cycles_with_price", pa.int32()), ("cycles_total", pa.int32()),
+                            ("source_resolution", pa.string())] + TRAZA)
+
 IGCC = "10Y1001C--00119X"   # área virtual de la plataforma de neteo
 
 
@@ -264,8 +303,91 @@ TABLAS = {
                             ["area", "technology", "interval_start_utc"]),
     "load_forecast":    ("load_forecast", filas_carga("load_forecast_mw"), esquema_carga("load_forecast_mw"),
                          ["area", "interval_start_utc"]),
+    "cbmp_15min":       ("cbmp_afrr", filas_cbmp, ESQUEMA_CBMP, ["area", "direction", "interval_start_utc"]),
     "load_actual":      ("load_actual", filas_carga("load_mw"), esquema_carga("load_mw"), ["area", "interval_start_utc"]),
 }
+
+
+REFERENCIA_CBMP = "DE_50HZ"                       # Alemania: la serie más larga en PICASSO
+IDENTICAS_A_REFERENCIA = {"DE_TENNET", "DE_TRANSNETBW"}   # mismo CBMP que 50Hertz al céntimo (comprobado)
+ESQUEMA_CONVERGENCIA = pa.schema(
+    COMUNES + [("direction", pa.string()), ("reference_area", pa.string()),
+               ("cycles_total", pa.int32()), ("cycles_both_priced", pa.int32()), ("cycles_equal_price", pa.int32()),
+               ("cycles_only_area", pa.int32()), ("cycles_only_reference", pa.int32()),
+               ("mean_spread_eur_mwh", pa.float64()), ("mean_abs_spread_eur_mwh", pa.float64()),
+               ("max_abs_spread_eur_mwh", pa.float64())] + TRAZA)
+
+
+def _precios_4s(fichero):
+    """{sentido: {inicio del ciclo: precio o None}} de un fichero de CBMP."""
+    salida = defaultdict(dict)
+    for xml in documentos(fichero):
+        for attrs, _, puntos in series(xml):
+            sentido = SENTIDO.get(attrs.get("flowDirection.direction"), attrs.get("flowDirection.direction"))
+            for ts, p in puntos:
+                precio = p.get("activation_Price.amount")
+                salida[sentido][ts] = None if precio is None else float(precio)
+    return salida
+
+
+def construir_convergencia(bronze, silver, raiz, desde, hasta, ahora):
+    """Convergencia del CBMP de cada área con el de referencia, ciclo a ciclo.
+
+    PICASSO optimiza cada 4 s: si entre dos áreas no hay congestión, el precio marginal es el mismo en ese ciclo.
+    Para cada área, sentido y cuarto de hora se cuenta en cuántos ciclos ambas áreas tienen precio, en cuántos de
+    esos es idéntico (diferencia < 0,005 EUR/MWh) y cuánto se separan cuando no lo es. Comparar las medias de
+    15 min no sirve: dos áreas con el mismo precio en cada ciclo dan medias distintas si una tuvo activación en
+    más ciclos que la otra. Solo se comparan ficheros de la misma ventana (el mismo día)."""
+    tabla = "entsoe_cbmp_convergence_15min"
+    total_ins = total_act = 0
+    for (anio, mes), ficheros in lotes(bronze, "cbmp_afrr", desde, hasta).items():
+        por_ventana = defaultdict(dict)
+        for area, f in ficheros:
+            por_ventana[f.parent.name][area] = f
+        filas = {}
+        for etiqueta, areas in sorted(por_ventana.items()):
+            if REFERENCIA_CBMP not in areas:
+                continue
+            referencia = _precios_4s(areas[REFERENCIA_CBMP])
+            for area, f in sorted(areas.items()):
+                if area == REFERENCIA_CBMP or area in IDENTICAS_A_REFERENCIA:
+                    continue
+                for sentido, precios in _precios_4s(f).items():
+                    ref = referencia.get(sentido, {})
+                    cuartos = {}   # [ciclos, ambos, iguales, solo área, solo referencia, Σ dif, Σ |dif|, máx |dif|]
+                    for ts, precio in precios.items():
+                        if ts not in ref:
+                            continue
+                        c = cuartos.setdefault(ts.replace(minute=ts.minute - ts.minute % 15, second=0),
+                                               [0, 0, 0, 0, 0, 0.0, 0.0, 0.0])
+                        precio_ref = ref[ts]
+                        c[0] += 1
+                        if precio is not None and precio_ref is not None:
+                            dif = precio - precio_ref
+                            c[1] += 1
+                            c[2] += abs(dif) < 0.005
+                            c[5] += dif
+                            c[6] += abs(dif)
+                            c[7] = max(c[7], abs(dif))
+                        elif precio is not None:
+                            c[3] += 1
+                        elif precio_ref is not None:
+                            c[4] += 1
+                    for ts, (n, ambos, iguales, solo_area, solo_ref, suma, suma_abs, maximo) in cuartos.items():
+                        fila = {**base(area, ts, "PT15M", f, ahora, raiz), "direction": sentido,
+                                "reference_area": REFERENCIA_CBMP, "cycles_total": n, "cycles_both_priced": ambos,
+                                "cycles_equal_price": iguales, "cycles_only_area": solo_area,
+                                "cycles_only_reference": solo_ref,
+                                "mean_spread_eur_mwh": suma / ambos if ambos else None,
+                                "mean_abs_spread_eur_mwh": suma_abs / ambos if ambos else None,
+                                "max_abs_spread_eur_mwh": maximo if ambos else None}
+                        if (desde is None or fila["market_date"] >= desde) and (hasta is None or fila["market_date"] <= hasta):
+                            filas[(area, sentido, ts)] = fila
+        ins, act = guardar(silver, tabla, list(filas.values()), ESQUEMA_CONVERGENCIA,
+                           ["area", "direction", "reference_area", "interval_start_utc"])
+        total_ins, total_act = total_ins + ins, total_act + act
+        print(f"  {tabla} {anio}-{mes:02d}: {len(filas):,} filas", flush=True)
+    print(f"  {tabla}: {total_ins:,} insertadas, {total_act:,} actualizadas")
 
 
 def construir_fx(bronze, silver, raiz, ahora):
@@ -331,15 +453,17 @@ def main():
     p = argparse.ArgumentParser(description="Bronze → silver (Delta tables)")
     p.add_argument("--start", dest="desde", metavar="DATE", type=dt.date.fromisoformat, help="first market day, YYYY-MM-DD")
     p.add_argument("--end", dest="hasta", metavar="DATE", type=dt.date.fromisoformat, help="last market day, YYYY-MM-DD (inclusive)")
-    p.add_argument("--only", dest="solo", choices=sorted([*TABLAS, "fx_rate"]), nargs="+", help="build only these tables")
+    p.add_argument("--only", dest="solo", choices=sorted([*TABLAS, "cbmp_convergence", "fx_rate"]), nargs="+", help="build only these tables")
     p.add_argument("--data-dir", dest="datos", type=Path, default=RAIZ / "data", help="data folder (default: ./data)")
     p.add_argument("--silver-dir", dest="silver", type=Path, help="write silver here instead of <data-dir>/silver")
     a = p.parse_args()
     bronze, silver = a.datos / "bronze", a.silver or a.datos / "silver"
     ahora = dt.datetime.now(UTC)
     print("Construyendo silver…")
-    nombres = a.solo or [*TABLAS, "fx_rate"]
+    nombres = a.solo or [*TABLAS, "cbmp_convergence", "fx_rate"]
     coberturas = {n: construir(n, bronze, silver, RAIZ, a.desde, a.hasta, ahora) for n in nombres if n in TABLAS}
+    if "cbmp_convergence" in nombres:
+        construir_convergencia(bronze, silver, RAIZ, a.desde, a.hasta, ahora)
     if "fx_rate" in nombres:
         construir_fx(bronze, silver, RAIZ, ahora)
     print("\nCobertura (por cuartos de hora del día de mercado):")

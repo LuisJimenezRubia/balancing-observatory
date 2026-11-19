@@ -32,3 +32,21 @@ models:
         tests: [not_null, {relationships: {arguments: {to: ref('areas'), field: area}}}]
       - name: system_imbalance_mwh
         tests: [not_null]
+  - name: stg_cbmp_15min
+    description: >
+      aFRR cross-border marginal price (PICASSO) per price area, direction and quarter-hour, aggregated in silver
+      from the 4-second optimisation cycles. Germany is taken from 50Hertz (the German control areas are identical).
+    tests:
+      - unique_combination: {arguments: {columns: [area, direction, interval_start_utc]}}
+    columns:
+      - name: direction
+        tests: [not_null, {accepted_values: {arguments: {values: [up, down]}}}]
+      - name: cycles_total
+        tests: [not_null]
+  - name: stg_cbmp_convergence_15min
+    description: CBMP convergence of each area with the reference area, counted per 4-second cycle in silver.
+    tests:
+      - unique_combination: {arguments: {columns: [area, reference_area, direction, interval_start_utc]}}
+    columns:
+      - name: reference_area
+        tests: [not_null, {accepted_values: {arguments: {values: [DE]}}}]
