@@ -13,6 +13,9 @@ Tablas (quedan por añadir reservas, precios de activación, ofertas agregadas y
   entsoe_cbmp_15min           CBMP de aFRR (PICASSO) agregado de 4 s a 15 min por área y sentido     (A84 + A67)
   entsoe_cbmp_convergence_15min  convergencia del CBMP con el área de referencia, medida ciclo a ciclo (4 s)
                               y resumida por cuarto de hora                                        (A84 + A67)
+  entsoe_contracted_reserves  reserva de balance contratada (MW) y su precio, por producto y sentido   (A81)
+  entsoe_activation_price     precio de la energía de balance activada, por producto y sentido     (A84 + A16 / A68)
+  entsoe_balancing_bids       energía de balance ofertada (MW) y no disponible, por producto        (A24)
   ecb_fx_rate                 tipo de cambio de referencia del BCE, unidades de moneda por euro    (ingest/fx.py)
 
 Reglas (comprobadas con los datos, ver docs/conceptos-balance.md):
@@ -54,9 +57,10 @@ UTC = dt.timezone.utc
 CUARTO = dt.timedelta(minutes=15)
 TS = pa.timestamp("us", tz="UTC")
 RESOLUCIONES = {"PT4S": dt.timedelta(seconds=4), "PT1M": dt.timedelta(minutes=1), "PT15M": CUARTO,
-                "PT30M": dt.timedelta(minutes=30), "PT60M": dt.timedelta(hours=1)}
+                "PT30M": dt.timedelta(minutes=30), "PT60M": dt.timedelta(hours=1),
+                "P1D": dt.timedelta(days=1)}    # duración nominal: un día de cambio de hora dura 23 o 25 h
 LADO_PRECIO = {"A04": "surplus", "A05": "deficit", "A06": "average"}   # imbalance_Price.category
-SENTIDO = {"A01": "up", "A02": "down"}                                 # flowDirection.direction
+SENTIDO = {"A01": "up", "A02": "down", "A03": "symmetric"}                                 # flowDirection.direction
 
 
 # ---------------------------------------------------------------- bronze: ficheros y ventanas
@@ -82,10 +86,11 @@ def lotes(bronze, dataset, desde, hasta):
     Mes, quincenas partidas y días sueltos del mismo mes caen en el mismo lote.
     """
     grupos = defaultdict(list)
-    for f in (bronze / "entsoe" / dataset).glob("area=*/*=*/respuesta*"):
-        ini, fin = ventana(f.parent.name)
-        if (desde is None or fin >= desde) and (hasta is None or ini <= hasta):
-            grupos[(ini.year, ini.month)].append((f.stat().st_mtime, str(f), f.parent.parent.name.split("=", 1)[1], f))
+    for ds in ([dataset] if isinstance(dataset, str) else dataset):     # una tabla puede salir de varios datasets
+        for f in (bronze / "entsoe" / ds).glob("area=*/*=*/respuesta*"):
+            ini, fin = ventana(f.parent.name)
+            if (desde is None or fin >= desde) and (hasta is None or ini <= hasta):
+                grupos[(ini.year, ini.month)].append((f.stat().st_mtime, str(f), f.parent.parent.name.split("=", 1)[1], f))
     return {k: [(area, f) for _, _, area, f in sorted(v)] for k, v in sorted(grupos.items())}
 
 
@@ -120,19 +125,23 @@ def series(xml):
         return []
     salida = []
     for serie in (el for el in raiz if _local(el) == "TimeSeries"):
-        attrs = {_local(h): (h.text or "").strip() for h in serie if len(h) == 0}
+        attrs = {f"doc.{_local(h)}": (h.text or "").strip() for h in raiz if len(h) == 0}   # cabecera del documento
+        attrs.update({_local(h): (h.text or "").strip() for h in serie if len(h) == 0})
         attrs.update({_local(n): (n.text or "").strip() for h in serie if _local(h) == "MktPSRType" for n in h})
         for periodo in (el for el in serie if _local(el) == "Period"):
             intervalo = next(el for el in periodo if _local(el) == "timeInterval")
             inicio, fin = (parse_ts(next(el.text for el in intervalo if _local(el) == n)) for n in ("start", "end"))
             res = next(el.text for el in periodo if _local(el) == "resolution")
-            paso = RESOLUCIONES[res]
+            # nº de posiciones según la duración nominal; el paso real sale del propio Period, para que un
+            # punto diario (P1D) cubra el día entero aunque tenga 23 o 25 horas
+            n_posiciones = max(1, round((fin - inicio) / RESOLUCIONES[res]))
+            paso = (fin - inicio) / n_posiciones
             puntos = {}
             for p in (el for el in periodo if _local(el) == "Point"):
                 campos = {_local(h): h.text for h in p if len(h) == 0}
                 puntos[int(campos.pop("position"))] = campos
             filas, ultimo = [], None
-            for pos in range(1, int((fin - inicio) / paso) + 1):
+            for pos in range(1, n_posiciones + 1):
                 ultimo = puntos.get(pos, ultimo)
                 if ultimo is not None:          # si el Period empieza con hueco no se inventa nada
                     filas.append((inicio + (pos - 1) * paso, ultimo))
@@ -238,6 +247,89 @@ ESQUEMA_CBMP = pa.schema(COMUNES + [("direction", pa.string())]
                          + [("cycles_with_price", pa.int32()), ("cycles_total", pa.int32()),
                             ("source_resolution", pa.string())] + TRAZA)
 
+PRODUCTO_PROCESO = {"A52": "FCR", "A51": "aFRR", "A47": "mFRR", "A60": "mFRR_scheduled", "A61": "mFRR_direct", "A46": "RR"}
+PRODUCTO_NEGOCIO = {"A95": "FCR", "A96": "aFRR", "A97": "mFRR", "A98": "RR"}
+CATEGORIA_PRECIO = {"A06": "average", "A07": "marginal", "A08": "cbmp"}
+
+
+def _num(texto):
+    return None if texto is None else float(texto)
+
+
+def _dims(attrs):
+    """Dimensiones comunes de las series de balance: sentido, tipo de producto estándar/original y tipo de recurso."""
+    return {"direction": SENTIDO.get(attrs.get("flowDirection.direction"), attrs.get("flowDirection.direction") or "na"),
+            "standard_product": attrs.get("standard_MarketProduct.marketProductType") or "na",
+            "original_product": attrs.get("original_MarketProduct.marketProductType") or "na",
+            "psr_type": attrs.get("mktPSRType.psrType") or "na"}
+
+
+DIMS = [("direction", pa.string()), ("standard_product", pa.string()), ("original_product", pa.string()),
+        ("psr_type", pa.string())]
+
+
+def filas_reservas(area, fichero, ahora, raiz):
+    """A81. Capacidad de balance contratada (MW) y precio de adquisición. El producto viene en la cabecera de cada
+    documento (processType: A52 FCR, A51 aFRR, A47 mFRR); un ZIP trae un documento por producto. El precio se
+    guarda tal cual lo publica el TSO, con su categoría (medio o marginal); la unidad temporal del precio
+    (por hora o por periodo de contratación) depende del TSO y se resuelve en gold."""
+    for xml in documentos(fichero):
+        for attrs, res, puntos in series(xml):
+            producto = PRODUCTO_PROCESO.get(attrs.get("doc.process.processType"), attrs.get("doc.process.processType") or "na")
+            dims = _dims(attrs)
+            for ts, p in puntos:
+                categoria = CATEGORIA_PRECIO.get(p.get("imbalance_Price.category"), p.get("imbalance_Price.category") or "na")
+                yield (area, producto, *dims.values(), categoria, ts), {
+                    **base(area, ts, res, fichero, ahora, raiz), "product": producto, **dims,
+                    "price_category": categoria, "contracted_mw": _num(p.get("quantity")),
+                    "procurement_price": _num(p.get("procurement_Price.amount")),
+                    "currency": attrs.get("currency_Unit.name"),
+                    "market_agreement": attrs.get("type_MarketAgreement.type")}
+
+
+ESQUEMA_RESERVAS = pa.schema(COMUNES + [("product", pa.string())] + DIMS + [
+    ("price_category", pa.string()), ("contracted_mw", pa.float64()), ("procurement_price", pa.float64()),
+    ("currency", pa.string()), ("market_agreement", pa.string())] + TRAZA)
+
+
+def filas_precio_activacion(area, fichero, ahora, raiz):
+    """A84 con processType A16 (realizado) o A68 (mercado local). Precio de la energía de balance activada por
+    producto (businessType: A95 FCR, A96 aFRR, A97 mFRR, A98 RR) y sentido, en la moneda del TSO."""
+    for xml in documentos(fichero):
+        for attrs, res, puntos in series(xml):
+            producto = PRODUCTO_NEGOCIO.get(attrs.get("businessType"), attrs.get("businessType") or "na")
+            proceso = attrs.get("doc.process.processType") or "na"
+            dims = _dims(attrs)
+            for ts, p in puntos:
+                categoria = CATEGORIA_PRECIO.get(p.get("imbalance_Price.category"), p.get("imbalance_Price.category") or "na")
+                yield (area, producto, proceso, *dims.values(), categoria, ts), {
+                    **base(area, ts, res, fichero, ahora, raiz), "product": producto, "process_type": proceso, **dims,
+                    "price_category": categoria, "activation_price": _num(p.get("activation_Price.amount")),
+                    "currency": attrs.get("currency_Unit.name")}
+
+
+ESQUEMA_PRECIO_ACTIVACION = pa.schema(COMUNES + [("product", pa.string()), ("process_type", pa.string())] + DIMS + [
+    ("price_category", pa.string()), ("activation_price", pa.float64()), ("currency", pa.string())] + TRAZA)
+
+
+def filas_ofertas(area, fichero, ahora, raiz):
+    """A24. Energía de balance OFERTADA por los BSP (MW disponibles para activar) y parte no disponible. No es la
+    energía activada: mide la liquidez del mercado. El producto viene en la cabecera (A51 aFRR, A47 mFRR,
+    A60 mFRR programado, A61 mFRR directo)."""
+    for xml in documentos(fichero):
+        for attrs, res, puntos in series(xml):
+            producto = PRODUCTO_PROCESO.get(attrs.get("doc.process.processType"), attrs.get("doc.process.processType") or "na")
+            dims = _dims(attrs)
+            for ts, p in puntos:
+                yield (area, producto, *dims.values(), ts), {
+                    **base(area, ts, res, fichero, ahora, raiz), "product": producto, **dims,
+                    "offered_mw": _num(p.get("quantity")),
+                    "unavailable_mw": _num(p.get("unavailable_Quantity.quantity"))}
+
+
+ESQUEMA_OFERTAS = pa.schema(COMUNES + [("product", pa.string())] + DIMS + [
+    ("offered_mw", pa.float64()), ("unavailable_mw", pa.float64())] + TRAZA)
+
 IGCC = "10Y1001C--00119X"   # área virtual de la plataforma de neteo
 
 
@@ -291,6 +383,7 @@ def esquema_carga(columna):
 
 
 # tabla silver → (dataset de bronze, generador de filas, esquema, clave natural)
+CLAVE_DIMS = ["direction", "standard_product", "original_product", "psr_type"]
 TABLAS = {
     "imbalance_price":  ("imbalance_price", filas_precio_desvio, ESQUEMA_PRECIO,
                          ["area", "imbalance_side", "interval_start_utc"]),
@@ -303,6 +396,12 @@ TABLAS = {
                             ["area", "technology", "interval_start_utc"]),
     "load_forecast":    ("load_forecast", filas_carga("load_forecast_mw"), esquema_carga("load_forecast_mw"),
                          ["area", "interval_start_utc"]),
+    "contracted_reserves": ("contracted_reserves", filas_reservas, ESQUEMA_RESERVAS,
+                            ["area", "product", *CLAVE_DIMS, "price_category", "interval_start_utc"]),
+    "activation_price":    (("activation_price", "activation_price_ls"), filas_precio_activacion, ESQUEMA_PRECIO_ACTIVACION,
+                            ["area", "product", "process_type", *CLAVE_DIMS, "price_category", "interval_start_utc"]),
+    "balancing_bids":      (("aggregated_bids_afrr", "aggregated_bids_mfrr", "aggregated_bids_mfrr_sa", "aggregated_bids_mfrr_da"),
+                            filas_ofertas, ESQUEMA_OFERTAS, ["area", "product", *CLAVE_DIMS, "interval_start_utc"]),
     "cbmp_15min":       ("cbmp_afrr", filas_cbmp, ESQUEMA_CBMP, ["area", "direction", "interval_start_utc"]),
     "load_actual":      ("load_actual", filas_carga("load_mw"), esquema_carga("load_mw"), ["area", "interval_start_utc"]),
 }
@@ -413,7 +512,7 @@ def construir(nombre, bronze, silver, raiz, desde, hasta, ahora):
     tabla = f"entsoe_{nombre}"
     total_ins = total_act = 0
     cobertura = defaultdict(lambda: defaultdict(set))    # área[/tecnología] → día de mercado → cuartos cubiertos
-    grupo = lambda fila: fila["area"] + (f"/{fila['technology']}" if "technology" in fila else "")
+    grupo = lambda fila: "/".join(str(fila[c]) for c in ("area", "technology", "product", "process_type") if c in fila)
     for (anio, mes), ficheros in lotes(bronze, dataset, desde, hasta).items():
         filas = {}
         for area, f in ficheros:
