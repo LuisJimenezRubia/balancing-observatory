@@ -61,3 +61,34 @@ models:
     description: Monthly cycle-weighted CBMP convergence with the reference area, per area and direction.
     tests:
       - unique_combination: {arguments: {columns: [area, reference_area, direction, month]}}
+  - name: dim_technology
+    columns:
+      - name: technology
+        tests: [unique, not_null]
+  - name: fct_forecast_error
+    description: >
+      Day-ahead forecast error per zone, technology and hour; error_mw = actual minus forecast. Only hours where
+      forecast and actual are both complete.
+    tests:
+      - unique_combination: {arguments: {columns: [area, technology, hour_start_utc]}}
+    columns:
+      - name: technology
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_technology'), field: technology}}}]
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
+      - name: error_mw
+        tests: [not_null]
+  - name: mart_monthly_forecast_quality
+    description: Monthly MAE, bias, RMSE and normalised MAE of the day-ahead forecast per zone and technology.
+    tests:
+      - unique_combination: {arguments: {columns: [area, technology, month]}}
+  - name: mart_hourly_forecast_quality
+    description: Hour-of-day profile (Brussels time) of the forecast error per zone and technology.
+    tests:
+      - unique_combination: {arguments: {columns: [area, technology, hour_local]}}
+  - name: mart_forecast_error_vs_imbalance
+    description: >
+      Monthly correlation between the net day-ahead forecast error (wind + solar − load) and the system
+      imbalance, per imbalance-price area.
+    tests:
+      - unique_combination: {arguments: {columns: [area, month]}}

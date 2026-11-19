@@ -50,3 +50,14 @@ models:
     columns:
       - name: reference_area
         tests: [not_null, {accepted_values: {arguments: {values: [DE]}}}]
+  - name: stg_forecast_actual_hourly
+    description: >
+      Day-ahead forecast and actual value of wind, solar and load per zone, technology and hour (UTC), in MW,
+      with the number of quarter-hours each side covers.
+    tests:
+      - unique_combination: {arguments: {columns: [area, technology, hour_start_utc]}}
+    columns:
+      - name: technology
+        tests: [not_null, {relationships: {arguments: {to: ref('technologies'), field: technology}}}]
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('areas'), field: area}}}]
