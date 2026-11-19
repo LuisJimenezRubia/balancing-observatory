@@ -15,7 +15,7 @@ Tablas (quedan por añadir reservas, precios de activación, ofertas agregadas y
                               y resumida por cuarto de hora                                        (A84 + A67)
   entsoe_contracted_reserves  reserva de balance contratada (MW) y su precio, por producto y sentido   (A81)
   entsoe_activation_price     precio de la energía de balance activada, por producto y sentido     (A84 + A16 / A68)
-  entsoe_balancing_bids       energía de balance ofertada (MW) y no disponible, por producto        (A24)
+  entsoe_balancing_bids       energía de balance ofertada, activada y no disponible (MW), por producto (A24)
   ecb_fx_rate                 tipo de cambio de referencia del BCE, unidades de moneda por euro    (ingest/fx.py)
 
 Reglas (comprobadas con los datos, ver docs/conceptos-balance.md):
@@ -313,9 +313,10 @@ ESQUEMA_PRECIO_ACTIVACION = pa.schema(COMUNES + [("product", pa.string()), ("pro
 
 
 def filas_ofertas(area, fichero, ahora, raiz):
-    """A24. Energía de balance OFERTADA por los BSP (MW disponibles para activar) y parte no disponible. No es la
-    energía activada: mide la liquidez del mercado. El producto viene en la cabecera (A51 aFRR, A47 mFRR,
-    A60 mFRR programado, A61 mFRR directo)."""
+    """A24. Por producto y sentido: energía de balance ofertada por los BSP (quantity), activada
+    (secondaryQuantity) y no disponible (unavailable_Quantity). No todos los TSO publican las tres: la activada
+    falta en varios (p. ej. BE y DK en mFRR, casi todos en aFRR) y se deja nula, nunca a cero. El producto viene
+    en la cabecera (A51 aFRR, A47 mFRR, A60 mFRR programado, A61 mFRR directo)."""
     for xml in documentos(fichero):
         for attrs, res, puntos in series(xml):
             producto = PRODUCTO_PROCESO.get(attrs.get("doc.process.processType"), attrs.get("doc.process.processType") or "na")
@@ -324,11 +325,12 @@ def filas_ofertas(area, fichero, ahora, raiz):
                 yield (area, producto, *dims.values(), ts), {
                     **base(area, ts, res, fichero, ahora, raiz), "product": producto, **dims,
                     "offered_mw": _num(p.get("quantity")),
+                    "activated_mw": _num(p.get("secondaryQuantity")),
                     "unavailable_mw": _num(p.get("unavailable_Quantity.quantity"))}
 
 
 ESQUEMA_OFERTAS = pa.schema(COMUNES + [("product", pa.string())] + DIMS + [
-    ("offered_mw", pa.float64()), ("unavailable_mw", pa.float64())] + TRAZA)
+    ("offered_mw", pa.float64()), ("activated_mw", pa.float64()), ("unavailable_mw", pa.float64())] + TRAZA)
 
 IGCC = "10Y1001C--00119X"   # área virtual de la plataforma de neteo
 
