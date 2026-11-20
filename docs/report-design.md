@@ -1,11 +1,12 @@
 # Power BI report — design
 
-Semantic model defined as code (TMDL, `serve/powerbi/`) on the Parquet/Delta tables exported by
-`serve/export_gold.py`. Built in Power BI Desktop (Windows PC, reading the Mac's shared folder) first; Direct Lake on
-Microsoft Fabric at the end, as in grid-lakehouse.
+Semantic model defined as code (TMDL, `serve/powerbi/`) on the Parquet tables exported from gold by
+`serve/export_gold.py`. Built in Power BI Desktop first; Direct Lake on Microsoft Fabric at the end, as in
+grid-lakehouse.
 
-This document comes before gold on purpose: every visual below names the mart it reads, so the list of marts is the
-gold backlog.
+Every visual below names the gold table it reads. All of them exist and are tested (`gold/models/marts/`).
+This document was rewritten on 2026-11-20 after the data was loaded: the section "What the data changed" lists
+the points where the first design did not survive contact with the source.
 
 ## Model
 
@@ -13,113 +14,138 @@ Star schema, single-direction many-to-one relationships.
 
 | From (many) | Column | To (one) | Column |
 |---|---|---|---|
-| fct_imbalance, fct_cbmp_15min, fct_activated_energy, fct_forecast_error, mart_daily_* | market_date | dim_date | market_date |
-| mart_monthly_* | month | dim_date | market_date (first day of month) |
+| every fact with `market_date` | market_date | dim_date | market_date |
+| every mart with `month` | month | dim_date | market_date (first day of the month) |
 | every fact and mart | area | dim_area | area |
-| fct_cbmp_15min, fct_activated_energy, fct_contracted_reserves | product (aFRR, mFRR, FCR, RR) | dim_product | product |
-| fct_forecast_error | technology (wind_onshore, wind_offshore, solar, load) | dim_technology | technology |
+| fct_forecast_error, mart_*_forecast_quality | technology | dim_technology | technology |
 
-`dim_area` comes from the seed `areas.csv`: EIC, country, TSO, area type (control area / bidding zone / country),
-imbalance-price area (the four German control areas share one price, `DE`), and the dates each TSO joined PICASSO
-and MARI. Those dates drive the before/after comparisons; they are the most important attribute in the model.
+`dim_area` (seed `areas.csv`): EIC, country, TSO, area type (control area / bidding zone / country), the
+imbalance-price area it belongs to, and the dates the TSO joined PICASSO and MARI, with the source of each date in
+`accession_note`. Those dates drive the before/after comparisons.
 
-Time: `interval_start_utc` is the true instant; `interval_start_local`, `hour_local` and `quarter_of_day` are
-Brussels wall-clock values for hour-of-day visuals. Mark `dim_date` as the date table. Clock-change days have 92 or
-100 quarter-hours; tests expect the right count.
+Two area grains coexist and the report must not mix them:
 
-## Gold tables the report needs
+- **Imbalance-price areas** (AT, BE, CZ, DE, DK1, DK2, FR, NL): `fct_imbalance`, `fct_cbmp_15min`,
+  `fct_cbmp_convergence_15min`. Germany is one area: one imbalance price (reBAP), and the German control areas
+  publish an identical CBMP.
+- **Control areas** (the same plus DE_50HZ, DE_AMPRION, DE_TENNET, DE_TRANSNETBW instead of DE): reserves, offered
+  and activated energy, activation prices, netting.
+- **Bidding zones** for the forecast benchmark (DE_LU instead of the German areas).
 
-| Table | Grain | Source silver | Used on pages |
-|---|---|---|---|
-| `fct_imbalance` | area × 15 min: imbalance price (EUR/MWh), imbalance volume (MW, signed), imbalance cost | A85, A86 | 1, 2 |
-| `fct_cbmp_15min` | area × direction × 15 min: VWAP, min, max, std, n_cycles, n_cycles_with_activation, from the 4 s CBMP | A84+A67 | 1, 3 |
-| `fct_cbmp_spread_15min` | area × 15 min: CBMP VWAP minus the reference area's (var `cbmp_reference_zone`), convergence flag (± var `cbmp_convergence_eur_mwh`) | fct_cbmp_15min | 3 |
-| `fct_activated_energy` | area × product × direction × 15 min: activated MWh (A24), of which exchanged via platform (B17 A51 aggregated), activation price (A84 A16/A68) | A24, B17, A84 | 4 |
-| `fct_netting` | area × 15 min: IGCC netted import/export MWh | B17+A63 | 4 |
-| `fct_contracted_reserves` | area × product × direction × day: contracted MW and price EUR/MW/h | A81 | 5 |
-| `fct_forecast_error` | area × technology × 15/60 min: day-ahead forecast, actual, error, abs error, % error | A69, A74, A65 | 6 |
-| `mart_monthly_imbalance_cost` | area × month: Σ\|imbalance\|×price / Σ\|imbalance\| (EUR/MWh), mean price, p95, share of ISPs above 500 EUR/MWh, months since PICASSO/MARI accession | fct_imbalance, dim_area | 1, 2 |
-| `mart_hourly_imbalance_profile` | area × hour_local: mean price, mean abs imbalance | fct_imbalance | 2 |
-| `mart_monthly_cbmp_convergence` | area × direction × month: share of ISPs converged with reference, mean spread, p95 spread, max spread, extreme-price share (vars) | fct_cbmp_spread_15min | 3 |
-| `mart_daily_cbmp_divergence` | area × date: ISPs diverged, max spread, worst hour (for the "what happened that day" drill) | fct_cbmp_spread_15min | 3 |
-| `mart_monthly_activation_mix` | area × product × month: activated MWh home vs exchanged, netted MWh, share exchanged, mean activation price | fct_activated_energy, fct_netting | 4 |
-| `mart_monthly_capacity_vs_energy` | area × product × month: capacity cost (MW × price × h) vs energy cost (MWh × price) | fct_contracted_reserves, fct_activated_energy | 5 |
-| `mart_monthly_forecast_quality` | area × technology × month: MAE (MW), bias (MW), nMAE (% of installed or mean), RMSE | fct_forecast_error | 6 |
-| `mart_hourly_forecast_quality` | area × technology × hour_local: MAE, bias | fct_forecast_error | 6 |
-| `mart_forecast_error_vs_imbalance` | area × month: correlation(error renewables + load, system imbalance), correlation(abs error, imbalance price), imbalance cost per MW of forecast error | fct_forecast_error, fct_imbalance | 6 |
+Time: `interval_start_utc` is the true instant; `interval_start_local` and `hour_local` are Brussels wall-clock
+values for hour-of-day visuals. Mark `dim_date` as the date table. `dim_date.quarters_in_day` is 92, 96 or 100.
 
-Dimensions: `dim_date` (as grid-lakehouse), `dim_area` (seed), `dim_product` (seed), `dim_technology` (seed).
+## Gold tables
+
+| Table | Grain | Used on pages |
+|---|---|---|
+| `fct_imbalance` | price area × 15 min: imbalance price (EUR/MWh, surplus and deficit sides), signed system imbalance (MWh, positive = long) | 1, 2 |
+| `mart_monthly_imbalance_cost` | price area × month: mean, median, p05, p95, standard deviation, share of ISPs beyond ±500 EUR/MWh, imbalance-weighted price, months since PICASSO / MARI accession | 1, 2 |
+| `fct_cbmp_15min` | price area × direction × 15 min: mean, min, max, std of the CBMP over the 4-second cycles that carry a price; share of cycles that do | 3 |
+| `fct_cbmp_convergence_15min` | price area × direction × 15 min: cycles where area and reference both have a price, cycles where it is identical, spread | 3 |
+| `mart_monthly_cbmp_convergence` | price area × direction × month: cycle-weighted convergence share, fully converged ISP share, mean and p95 spread | 1, 3 |
+| `fct_contracted_reserves` | control area × product × direction × day: contracted MW, procurement price as published | 5 |
+| `fct_balancing_energy` | control area × product × direction × day: offered MW, activated MWh | 4 |
+| `fct_activation_price` | control area × product × process × direction × price category × day: price of activated energy (EUR/MWh) | 4 |
+| `fct_netting` / `mart_monthly_netting` | control area × day / month: IGCC netted energy, import and export | 4 |
+| `mart_monthly_balancing_overview` | control area × product × direction × month: contracted MW, offered MW, activated MWh, activation price | 4, 5 |
+| `fct_forecast_error` | zone × technology × hour: day-ahead forecast, actual, error, `is_comparable` | 6 |
+| `mart_monthly_forecast_quality`, `mart_hourly_forecast_quality` | zone × technology × month / hour of day: MAE, bias, RMSE, normalised MAE | 6 |
+| `mart_forecast_error_vs_imbalance` | price area × month: correlation between net forecast error and system imbalance | 6 |
+
+Dimensions: `dim_date`, `dim_area`, `dim_technology`.
 
 ## Measures (DAX)
 
 ```dax
--- Imbalance
-Imbalance cost (€/MWh) = DIVIDE ( SUMX ( fct_imbalance, ABS ( fct_imbalance[imbalance_mw] ) * 0.25 * fct_imbalance[imbalance_price_eur_mwh] ),
-                                  SUMX ( fct_imbalance, ABS ( fct_imbalance[imbalance_mw] ) * 0.25 ) )
+-- Imbalance (fct_imbalance; system_imbalance_mwh is energy per quarter-hour, already in MWh)
 Avg imbalance price (€/MWh) = AVERAGE ( fct_imbalance[imbalance_price_eur_mwh] )
+Imbalance price std (€/MWh) = STDEV.S ( fct_imbalance[imbalance_price_eur_mwh] )
 Extreme ISP share % = DIVIDE ( CALCULATE ( COUNTROWS ( fct_imbalance ), ABS ( fct_imbalance[imbalance_price_eur_mwh] ) > 500 ),
                                COUNTROWS ( fct_imbalance ) )
-Mean abs imbalance (MW) = AVERAGEX ( fct_imbalance, ABS ( fct_imbalance[imbalance_mw] ) )
+Imbalance-weighted price (€/MWh) = DIVIDE ( SUMX ( fct_imbalance, ABS ( fct_imbalance[system_imbalance_mwh] ) * fct_imbalance[imbalance_price_eur_mwh] ),
+                                            SUMX ( fct_imbalance, ABS ( fct_imbalance[system_imbalance_mwh] ) ) )
+Mean abs imbalance (MWh per ISP) = AVERAGEX ( fct_imbalance, ABS ( fct_imbalance[system_imbalance_mwh] ) )
+System short share % = DIVIDE ( CALCULATE ( COUNTROWS ( fct_imbalance ), fct_imbalance[system_imbalance_mwh] < 0 ),
+                                CALCULATE ( COUNTROWS ( fct_imbalance ), NOT ISBLANK ( fct_imbalance[system_imbalance_mwh] ) ) )
 
--- CBMP (PICASSO)
-CBMP VWAP (€/MWh) = DIVIDE ( SUMX ( fct_cbmp_15min, fct_cbmp_15min[vwap_eur_mwh] * fct_cbmp_15min[activated_mwh] ),
-                             SUM ( fct_cbmp_15min[activated_mwh] ) )
-CBMP convergence % = DIVIDE ( CALCULATE ( COUNTROWS ( fct_cbmp_spread_15min ), fct_cbmp_spread_15min[is_converged] = TRUE () ),
-                              COUNTROWS ( fct_cbmp_spread_15min ) )
-CBMP mean spread (€/MWh) = AVERAGEX ( fct_cbmp_spread_15min, ABS ( fct_cbmp_spread_15min[spread_eur_mwh] ) )
-CBMP p95 spread (€/MWh)  = PERCENTILEX.INC ( fct_cbmp_spread_15min, ABS ( fct_cbmp_spread_15min[spread_eur_mwh] ), 0.95 )
-CBMP extreme share % = DIVIDE ( CALCULATE ( COUNTROWS ( fct_cbmp_15min ), fct_cbmp_15min[max_eur_mwh] > 1000 || fct_cbmp_15min[min_eur_mwh] < -500 ),
-                                COUNTROWS ( fct_cbmp_15min ) )
+-- PICASSO (convergence is counted per 4-second cycle, so the ratio must be taken on the cycle sums)
+CBMP convergence % = DIVIDE ( SUM ( fct_cbmp_convergence_15min[cycles_equal_price] ),
+                              SUM ( fct_cbmp_convergence_15min[cycles_both_priced] ) )
+Comparable cycles % = DIVIDE ( SUM ( fct_cbmp_convergence_15min[cycles_both_priced] ),
+                               SUM ( fct_cbmp_convergence_15min[cycles_total] ) )
+CBMP mean abs spread (€/MWh) = DIVIDE ( SUMX ( fct_cbmp_convergence_15min, fct_cbmp_convergence_15min[mean_abs_spread_eur_mwh] * fct_cbmp_convergence_15min[cycles_both_priced] ),
+                                        SUM ( fct_cbmp_convergence_15min[cycles_both_priced] ) )
+Fully converged ISP % = DIVIDE ( CALCULATE ( COUNTROWS ( fct_cbmp_convergence_15min ), fct_cbmp_convergence_15min[is_fully_converged] = TRUE () ),
+                                 CALCULATE ( COUNTROWS ( fct_cbmp_convergence_15min ), fct_cbmp_convergence_15min[cycles_both_priced] > 0 ) )
+CBMP mean (€/MWh) = DIVIDE ( SUMX ( fct_cbmp_15min, fct_cbmp_15min[cbmp_mean_eur_mwh] * fct_cbmp_15min[cycles_with_price] ),
+                             SUM ( fct_cbmp_15min[cycles_with_price] ) )
 
--- Activation and exchange
-Activated energy (GWh) = DIVIDE ( SUM ( fct_activated_energy[activated_mwh] ), 1000 )
-Exchanged share % = DIVIDE ( SUM ( fct_activated_energy[exchanged_mwh] ), SUM ( fct_activated_energy[activated_mwh] ) )
+-- Balancing energy, reserves, netting
+Offered (MW) = AVERAGE ( fct_balancing_energy[offered_mw_avg] )
+Activated energy (GWh) = DIVIDE ( SUM ( fct_balancing_energy[activated_mwh] ), 1000 )
+Contracted reserve (MW) = AVERAGE ( fct_contracted_reserves[contracted_mw] )
 Netted energy (GWh) = DIVIDE ( SUM ( fct_netting[netted_mwh] ), 1000 )
-Avg activation price (€/MWh) = DIVIDE ( SUMX ( fct_activated_energy, fct_activated_energy[activated_mwh] * fct_activated_energy[price_eur_mwh] ),
-                                        SUM ( fct_activated_energy[activated_mwh] ) )
 
--- Capacity vs energy
-Capacity cost (M€) = DIVIDE ( SUM ( mart_monthly_capacity_vs_energy[capacity_cost_eur] ), 1e6 )
-Energy cost (M€)   = DIVIDE ( SUM ( mart_monthly_capacity_vs_energy[energy_cost_eur] ), 1e6 )
-Capacity share of cost % = DIVIDE ( [Capacity cost (M€)], [Capacity cost (M€)] + [Energy cost (M€)] )
-
--- Forecast quality
+-- Forecast quality (benchmark visuals carry the filter fct_forecast_error[is_comparable] = TRUE)
 Forecast MAE (MW)  = AVERAGE ( fct_forecast_error[abs_error_mw] )
 Forecast bias (MW) = AVERAGE ( fct_forecast_error[error_mw] )
 Forecast nMAE %    = DIVIDE ( [Forecast MAE (MW)], AVERAGE ( fct_forecast_error[actual_mw] ) )
-Error–imbalance correlation = AVERAGE ( mart_forecast_error_vs_imbalance[corr_error_imbalance] )
 ```
 
 ## Pages
 
-1. **Overview** — cards: areas covered, days loaded, automated tests passed, imbalance cost (€/MWh) for the
-   selected area vs the average of all areas, CBMP convergence %, exchanged share %. Line: monthly imbalance cost per area
-   with vertical markers at each area's PICASSO/MARI accession date (from `dim_area`). The headline chart of the project.
-2. **Imbalance prices** — small multiples of monthly mean and p95 imbalance price per area; heatmap area × hour of day
-   of mean imbalance price (`mart_hourly_imbalance_profile`); table of the 20 most expensive ISPs with area, date,
-   price, system imbalance. Caveat: Germany's reBAP is one price for four control areas.
-3. **PICASSO convergence** — convergence % by area and month (reference area selectable, default 50Hertz); 100 %
-   stacked bar converged / small spread / large spread per area; p95 spread by month; drill to
-   `mart_daily_cbmp_divergence` for the worst days, then to the 15-min series of that day with CBMP of each area
-   overlaid. Note on resolution: 4 s source aggregated to 15 min VWAP; max/min kept.
-4. **Activation and exchange** — monthly stacked columns per area: activated at home vs exchanged via platform, by
-   product (aFRR / mFRR); line of IGCC netted energy; exchanged share % before and after accession per area.
-5. **Capacity vs energy** — clustered columns capacity cost vs energy cost per area and month; capacity share of
-   cost by product; contracted MW by product and area over time.
-6. **Forecast quality** — MAE and bias by TSO and technology (wind onshore / offshore, solar, load), monthly and by
-   hour of day; scatter forecast error vs system imbalance per area (sampled hourly); bar of imbalance cost per MW of
-   forecast error per area, the bridge between the two halves of the project.
-7. **Data quality** — coverage matrix dataset × area × month (ok / partial / missing); publication lags; days
-   re-downloaded in the revision window and what changed; list of known source quirks (A03 curves, ZIP payloads,
-   process-type migration per TSO, Amprion not publishing A84, German price under the country EIC).
+1. **Overview** — cards: areas covered, days loaded, automated tests passed. Line of monthly imbalance-price
+   standard deviation per area with a marker at each area's PICASSO accession; small table "12 months before /
+   after accession" (standard deviation, extreme ISP share). Second line: monthly CBMP convergence with Germany.
+   The headline is volatility and tails, not the price level: the mean follows the wholesale market.
+2. **Imbalance prices** — small multiples of monthly mean and p95 per area; heatmap area × hour of day; table of
+   the most extreme ISPs (Belgium at the −15 000 EUR/MWh floor on 2026-04-06). Caveats on the page: Germany is one
+   price for four control areas; France publishes two prices (surplus ≠ deficit) almost always and the Netherlands
+   increasingly; system imbalance volume is missing for Denmark after July 2025 and for the Netherlands before 2025.
+3. **PICASSO convergence** — convergence % with Germany by area and month, one line per direction; comparable
+   cycles % next to it, so the reader sees how much of the time the comparison exists at all; mean and p95 spread;
+   drill to the quarter-hours of a day. Reference area fixed to Germany (50Hertz).
+4. **Activation, offers and netting** — mFRR offered MW against activated energy (scheduled and direct) by area and
+   month; activation price by product and direction; IGCC netted energy by area. aFRR appears with price and
+   offered volume only.
+5. **Contracted reserves** — contracted MW by product (FCR, aFRR, mFRR, RR), direction and area over time;
+   procurement price as an index per area (first month = 100), never as a cross-area comparison.
+6. **Forecast quality** — normalised MAE and bias by zone and technology (wind onshore / offshore, solar, load),
+   monthly and by hour of day, filtered to comparable series; correlation of the net forecast error with the
+   system imbalance per area.
+7. **Data quality** — coverage by dataset, area and month; the series flagged as not comparable and why
+   (`forecast_comparability` seed); source gaps (France imbalance data with 139 incomplete days, IGCC netting on
+   the 2023 clock-change days, Amprion publishing almost no balancing data); publication quirks (A03 curves,
+   mixed resolutions, CZK prices, 100-document limit per request, clock-change days truncated in monthly requests).
 
-Every page carries the source line (ENTSO-E Transparency Platform, data as published by each TSO) and, where
-needed, the caveat that platform accession dates and publication practices differ by TSO, so before/after
-comparisons are per area, never pooled.
+Every page carries the source line (ENTSO-E Transparency Platform, data as published by each TSO; ECB reference
+rates for currency conversion).
 
-## Open design points
+## What the data changed
 
-- Reference area for convergence: 50Hertz by default (longest PICASSO history), but a "European average" option
-  (volume-weighted VWAP across connected areas) would be more neutral; decide after seeing the data.
-- Whether to show the 4 s CBMP anywhere: probably one illustrative day on page 3 as a zoom-in, exported separately.
-- Forecast error normalisation: by mean actual (nMAE) in v1; installed capacity (A68 document type) in phase 2.
+- **No volume-weighted CBMP.** The CBMP dataset carries a price per 4-second cycle and no volume, so a VWAP cannot
+  be computed. The quarter-hour figure is the plain mean over the cycles that have a price.
+- **Convergence is measured per cycle, not on quarter-hour means.** Comparing 15-minute means gives about 20 %
+  convergence; counting cycles with an identical price gives 51–88 % depending on area and direction. Two areas with
+  the same price in every cycle still have different means when one of them had activation in more cycles.
+- **Activated aFRR volume is not published** in the aggregated-bids dataset (only offered volume, for Belgium and
+  Austria). Activated mFRR is, as scheduled and direct activation. The page "activated at home vs exchanged" became
+  "offered vs activated mFRR".
+- **Capacity cost in euros is not computed.** The procurement price comes in EUR/MW without saying whether it is
+  per hour or per contracted period, and that can differ by TSO.
+- **System imbalance comes in MWh per settlement period**, not MW; its sign is not documented and was derived from
+  the data (the "down" series coincides with high imbalance prices, i.e. the system is short).
+- **Czech imbalance prices are published in CZK** and converted with the ECB daily reference rate.
+- **Forecast benchmark at hourly grain**, because zones publish at 15 or 60 minutes; the Netherlands and DK1
+  offshore wind are excluded because forecast and actual do not cover the same perimeter.
+- **Imbalance cost "before / after accession" needs history**, so the light datasets were loaded from January 2023
+  instead of one year.
+
+## Open points
+
+- Exact PICASSO accession day for Belgium and the Netherlands, and the MARI accession date for France (2026):
+  validate against the CBMP data once the series is loaded back to 2022.
+- Why French convergence with Germany steps up from about 45 % to about 66 % in July 2026.
+- Cross-border aFRR exchange (B17 + A51, 4-second data): loaded in bronze, not yet in silver.
+- Whether to show one illustrative day of 4-second CBMP on page 3.
