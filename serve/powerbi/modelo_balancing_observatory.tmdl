@@ -1,0 +1,261 @@
+createOrReplace
+
+	relationship rel_fct_imbalance_market_date
+		fromColumn: fct_imbalance.market_date
+		toColumn: dim_date.market_date
+
+	relationship rel_fct_cbmp_15min_market_date
+		fromColumn: fct_cbmp_15min.market_date
+		toColumn: dim_date.market_date
+
+	relationship rel_fct_cbmp_convergence_15min_market_date
+		fromColumn: fct_cbmp_convergence_15min.market_date
+		toColumn: dim_date.market_date
+
+	relationship rel_fct_contracted_reserves_market_date
+		fromColumn: fct_contracted_reserves.market_date
+		toColumn: dim_date.market_date
+
+	relationship rel_fct_balancing_energy_market_date
+		fromColumn: fct_balancing_energy.market_date
+		toColumn: dim_date.market_date
+
+	relationship rel_fct_activation_price_market_date
+		fromColumn: fct_activation_price.market_date
+		toColumn: dim_date.market_date
+
+	relationship rel_fct_netting_market_date
+		fromColumn: fct_netting.market_date
+		toColumn: dim_date.market_date
+
+	relationship rel_fct_forecast_error_market_date
+		fromColumn: fct_forecast_error.market_date
+		toColumn: dim_date.market_date
+
+	relationship rel_mart_monthly_imbalance_cost_month
+		fromColumn: mart_monthly_imbalance_cost.month
+		toColumn: dim_date.market_date
+
+	relationship rel_mart_monthly_cbmp_convergence_month
+		fromColumn: mart_monthly_cbmp_convergence.month
+		toColumn: dim_date.market_date
+
+	relationship rel_mart_monthly_balancing_overview_month
+		fromColumn: mart_monthly_balancing_overview.month
+		toColumn: dim_date.market_date
+
+	relationship rel_mart_monthly_netting_month
+		fromColumn: mart_monthly_netting.month
+		toColumn: dim_date.market_date
+
+	relationship rel_mart_monthly_forecast_quality_month
+		fromColumn: mart_monthly_forecast_quality.month
+		toColumn: dim_date.market_date
+
+	relationship rel_mart_forecast_error_vs_imbalance_month
+		fromColumn: mart_forecast_error_vs_imbalance.month
+		toColumn: dim_date.market_date
+
+	relationship rel_fct_imbalance_area
+		fromColumn: fct_imbalance.area
+		toColumn: dim_area.area
+
+	relationship rel_fct_cbmp_15min_area
+		fromColumn: fct_cbmp_15min.area
+		toColumn: dim_area.area
+
+	relationship rel_fct_cbmp_convergence_15min_area
+		fromColumn: fct_cbmp_convergence_15min.area
+		toColumn: dim_area.area
+
+	relationship rel_fct_contracted_reserves_area
+		fromColumn: fct_contracted_reserves.area
+		toColumn: dim_area.area
+
+	relationship rel_fct_balancing_energy_area
+		fromColumn: fct_balancing_energy.area
+		toColumn: dim_area.area
+
+	relationship rel_fct_activation_price_area
+		fromColumn: fct_activation_price.area
+		toColumn: dim_area.area
+
+	relationship rel_fct_netting_area
+		fromColumn: fct_netting.area
+		toColumn: dim_area.area
+
+	relationship rel_fct_forecast_error_area
+		fromColumn: fct_forecast_error.area
+		toColumn: dim_area.area
+
+	relationship rel_mart_monthly_imbalance_cost_area
+		fromColumn: mart_monthly_imbalance_cost.area
+		toColumn: dim_area.area
+
+	relationship rel_mart_monthly_cbmp_convergence_area
+		fromColumn: mart_monthly_cbmp_convergence.area
+		toColumn: dim_area.area
+
+	relationship rel_mart_monthly_balancing_overview_area
+		fromColumn: mart_monthly_balancing_overview.area
+		toColumn: dim_area.area
+
+	relationship rel_mart_monthly_netting_area
+		fromColumn: mart_monthly_netting.area
+		toColumn: dim_area.area
+
+	relationship rel_mart_monthly_forecast_quality_area
+		fromColumn: mart_monthly_forecast_quality.area
+		toColumn: dim_area.area
+
+	relationship rel_mart_forecast_error_vs_imbalance_area
+		fromColumn: mart_forecast_error_vs_imbalance.area
+		toColumn: dim_area.area
+
+	relationship rel_mart_hourly_forecast_quality_area
+		fromColumn: mart_hourly_forecast_quality.area
+		toColumn: dim_area.area
+
+	relationship rel_dq_forecast_comparability_area
+		fromColumn: dq_forecast_comparability.area
+		toColumn: dim_area.area
+
+	relationship rel_fct_forecast_error_technology
+		fromColumn: fct_forecast_error.technology
+		toColumn: dim_technology.technology
+
+	relationship rel_mart_monthly_forecast_quality_technology
+		fromColumn: mart_monthly_forecast_quality.technology
+		toColumn: dim_technology.technology
+
+	relationship rel_mart_hourly_forecast_quality_technology
+		fromColumn: mart_hourly_forecast_quality.technology
+		toColumn: dim_technology.technology
+
+	relationship rel_dq_forecast_comparability_technology
+		fromColumn: dq_forecast_comparability.technology
+		toColumn: dim_technology.technology
+
+	table _Measures
+
+		measure 'Avg imbalance price (€/MWh)' = AVERAGE ( fct_imbalance[imbalance_price_eur_mwh] )
+			formatString: #,0.0
+			displayFolder: Imbalance
+
+		measure 'Imbalance price std (€/MWh)' = STDEV.S ( fct_imbalance[imbalance_price_eur_mwh] )
+			formatString: #,0.0
+			displayFolder: Imbalance
+
+		measure 'Imbalance price p95 (€/MWh)' = PERCENTILE.INC ( fct_imbalance[imbalance_price_eur_mwh], 0.95 )
+			formatString: #,0.0
+			displayFolder: Imbalance
+
+		measure 'Extreme ISP share %' = DIVIDE ( CALCULATE ( COUNTROWS ( fct_imbalance ), ABS ( fct_imbalance[imbalance_price_eur_mwh] ) > 500 ), COUNTROWS ( fct_imbalance ) )
+			formatString: 0.00%
+			displayFolder: Imbalance
+
+		measure 'Dual price share %' = DIVIDE ( CALCULATE ( COUNTROWS ( fct_imbalance ), fct_imbalance[is_dual_price] = TRUE () ), COUNTROWS ( fct_imbalance ) )
+			formatString: 0.0%
+			displayFolder: Imbalance
+
+		measure 'Imbalance-weighted price (€/MWh)' = DIVIDE ( SUMX ( fct_imbalance, ABS ( fct_imbalance[system_imbalance_mwh] ) * fct_imbalance[imbalance_price_eur_mwh] ), SUMX ( fct_imbalance, ABS ( fct_imbalance[system_imbalance_mwh] ) ) )
+			formatString: #,0.0
+			displayFolder: Imbalance
+
+		measure 'Mean abs imbalance (MWh per ISP)' = AVERAGEX ( fct_imbalance, ABS ( fct_imbalance[system_imbalance_mwh] ) )
+			formatString: #,0.0
+			displayFolder: Imbalance
+
+		measure 'System short share %' = DIVIDE ( CALCULATE ( COUNTROWS ( fct_imbalance ), fct_imbalance[system_imbalance_mwh] < 0 ), CALCULATE ( COUNTROWS ( fct_imbalance ), NOT ISBLANK ( fct_imbalance[system_imbalance_mwh] ) ) )
+			formatString: 0.0%
+			displayFolder: Imbalance
+
+		measure 'CBMP convergence %' = DIVIDE ( SUM ( fct_cbmp_convergence_15min[cycles_equal_price] ), SUM ( fct_cbmp_convergence_15min[cycles_both_priced] ) )
+			formatString: 0.0%
+			displayFolder: PICASSO
+
+		measure 'Comparable cycles %' = DIVIDE ( SUM ( fct_cbmp_convergence_15min[cycles_both_priced] ), SUM ( fct_cbmp_convergence_15min[cycles_total] ) )
+			formatString: 0.0%
+			displayFolder: PICASSO
+
+		measure 'Fully converged ISP %' = DIVIDE ( CALCULATE ( COUNTROWS ( fct_cbmp_convergence_15min ), fct_cbmp_convergence_15min[is_fully_converged] = TRUE () ), CALCULATE ( COUNTROWS ( fct_cbmp_convergence_15min ), fct_cbmp_convergence_15min[cycles_both_priced] > 0 ) )
+			formatString: 0.0%
+			displayFolder: PICASSO
+
+		measure 'CBMP mean abs spread (€/MWh)' = DIVIDE ( SUMX ( fct_cbmp_convergence_15min, fct_cbmp_convergence_15min[mean_abs_spread_eur_mwh] * fct_cbmp_convergence_15min[cycles_both_priced] ), SUM ( fct_cbmp_convergence_15min[cycles_both_priced] ) )
+			formatString: #,0.0
+			displayFolder: PICASSO
+
+		measure 'CBMP mean (€/MWh)' = DIVIDE ( SUMX ( fct_cbmp_15min, fct_cbmp_15min[cbmp_mean_eur_mwh] * fct_cbmp_15min[cycles_with_price] ), SUM ( fct_cbmp_15min[cycles_with_price] ) )
+			formatString: #,0.0
+			displayFolder: PICASSO
+
+		measure 'aFRR activation share %' = DIVIDE ( SUM ( fct_cbmp_15min[cycles_with_price] ), SUM ( fct_cbmp_15min[cycles_total] ) )
+			formatString: 0.0%
+			displayFolder: PICASSO
+
+		measure 'Offered (MW)' = AVERAGE ( fct_balancing_energy[offered_mw_avg] )
+			formatString: #,0
+			displayFolder: Balancing energy
+
+		measure 'Activated energy (GWh)' = DIVIDE ( SUM ( fct_balancing_energy[activated_mwh] ), 1000 )
+			formatString: #,0.0
+			displayFolder: Balancing energy
+
+		measure 'Activation price (€/MWh)' = DIVIDE ( SUMX ( fct_activation_price, fct_activation_price[mean_price_eur_mwh] * fct_activation_price[priced_intervals] ), SUM ( fct_activation_price[priced_intervals] ) )
+			formatString: #,0.0
+			displayFolder: Balancing energy
+
+		measure 'Netted energy (GWh)' = DIVIDE ( SUM ( fct_netting[netted_mwh] ), 1000 )
+			formatString: #,0.0
+			displayFolder: Balancing energy
+
+		measure 'Contracted reserve (MW)' = AVERAGE ( fct_contracted_reserves[contracted_mw] )
+			formatString: #,0
+			displayFolder: Reserves
+
+		measure 'Procurement price (as published)' = DIVIDE ( SUMX ( fct_contracted_reserves, fct_contracted_reserves[procurement_price] * fct_contracted_reserves[contracted_mw] ), SUMX ( fct_contracted_reserves, IF ( NOT ISBLANK ( fct_contracted_reserves[procurement_price] ), fct_contracted_reserves[contracted_mw] ) ) )
+			formatString: #,0.00
+			displayFolder: Reserves
+
+		measure 'Forecast MAE (MW)' = CALCULATE ( AVERAGE ( fct_forecast_error[abs_error_mw] ), fct_forecast_error[is_comparable] = TRUE () )
+			formatString: #,0
+			displayFolder: Forecast quality
+
+		measure 'Forecast bias (MW)' = CALCULATE ( AVERAGE ( fct_forecast_error[error_mw] ), fct_forecast_error[is_comparable] = TRUE () )
+			formatString: #,0
+			displayFolder: Forecast quality
+
+		measure 'Forecast nMAE %' = DIVIDE ( [Forecast MAE (MW)], CALCULATE ( AVERAGE ( fct_forecast_error[actual_mw] ), fct_forecast_error[is_comparable] = TRUE () ) )
+			formatString: 0.0%
+			displayFolder: Forecast quality
+
+		measure 'Error–imbalance correlation' = AVERAGE ( mart_forecast_error_vs_imbalance[corr_error_imbalance] )
+			formatString: 0.00
+			displayFolder: Forecast quality
+
+		measure 'Days loaded' = DISTINCTCOUNT ( fct_imbalance[market_date] )
+			formatString: #,0
+			displayFolder: Data quality
+
+		measure 'Areas covered' = DISTINCTCOUNT ( fct_imbalance[area] )
+			formatString: #,0
+			displayFolder: Data quality
+
+		measure 'Series not comparable' = CALCULATE ( COUNTROWS ( dq_forecast_comparability ), dq_forecast_comparability[is_comparable] = FALSE () )
+			formatString: #,0
+			displayFolder: Data quality
+
+		column Dummy
+			dataType: string
+			isHidden
+			summarizeBy: none
+			sourceColumn: Dummy
+
+		partition _Measures = m
+			mode: import
+			source =
+					let
+						Source = #table(type table [Dummy = text], {})
+					in
+						Source
