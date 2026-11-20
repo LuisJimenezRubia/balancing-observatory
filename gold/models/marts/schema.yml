@@ -97,3 +97,46 @@ models:
       imbalance, per imbalance-price area.
     tests:
       - unique_combination: {arguments: {columns: [area, month]}}
+  - name: fct_contracted_reserves
+    description: Contracted reserve (MW) and procurement price per control area, product, direction and market day.
+    tests:
+      - unique_combination: {arguments: {columns: [area, product, direction, market_date]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
+      - name: product
+        tests: [not_null, {accepted_values: {arguments: {values: [FCR, aFRR, mFRR, RR]}}}]
+      - name: contracted_mw
+        tests: [not_null]
+  - name: fct_balancing_energy
+    description: Offered and activated balancing energy per control area, product, direction and market day.
+    tests:
+      - unique_combination: {arguments: {columns: [area, product, direction, market_date]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
+      - name: product
+        tests: [not_null, {accepted_values: {arguments: {values: [aFRR, mFRR, mFRR_scheduled, mFRR_direct]}}}]
+  - name: fct_activation_price
+    description: Daily price of activated balancing energy per control area, product, process, direction and price category.
+    tests:
+      - unique_combination: {arguments: {columns: [area, product, process_type, direction, price_category, market_date]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
+  - name: fct_netting
+    description: IGCC netted energy per control area and market day.
+    tests:
+      - unique_combination: {arguments: {columns: [area, market_date]}}
+    columns:
+      - name: area
+        tests: [not_null, {relationships: {arguments: {to: ref('dim_area'), field: area}}}]
+  - name: mart_monthly_balancing_overview
+    description: >
+      Monthly contracted reserve, offered and activated energy and activation price per control area, product
+      and direction.
+    tests:
+      - unique_combination: {arguments: {columns: [area, product, direction, month]}}
+  - name: mart_monthly_netting
+    tests:
+      - unique_combination: {arguments: {columns: [area, month]}}

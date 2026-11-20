@@ -61,3 +61,27 @@ models:
         tests: [not_null, {relationships: {arguments: {to: ref('technologies'), field: technology}}}]
       - name: area
         tests: [not_null, {relationships: {arguments: {to: ref('areas'), field: area}}}]
+  - name: stg_contracted_reserves
+    description: Contracted balancing reserve per control area, product, direction and published interval.
+    tests:
+      - unique_combination: {arguments: {columns: [area, product, direction, interval_start_utc, resolution]}}
+    columns:
+      - name: hours
+        tests: [not_null]
+  - name: stg_balancing_bids
+    description: Offered, activated and unavailable balancing energy per control area, product, direction and interval.
+    tests:
+      - unique_combination: {arguments: {columns: [area, product, direction, interval_start_utc, resolution]}}
+    columns:
+      - name: hours
+        tests: [not_null]
+  - name: stg_activation_price
+    description: Price of activated balancing energy in EUR/MWh per control area, product, process, direction and interval.
+    tests:
+      - unique_combination: {arguments: {columns: [area, product, process_type, direction, price_category, interval_start_utc]}}
+    columns:
+      - name: activation_price_eur_mwh
+        tests: [not_null]
+  - name: stg_netting
+    tests:
+      - unique_combination: {arguments: {columns: [area, direction, interval_start_utc]}}

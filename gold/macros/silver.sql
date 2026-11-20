@@ -21,3 +21,8 @@
 {% macro cuartos(col) -%}
   case {{ col }} when 'PT15M' then 1 when 'PT30M' then 2 when 'PT60M' then 4 end
 {%- endmacro %}
+
+{#- Horas que cubre una fila según su resolución de origen (P1D = día nominal de 24 h). -#}
+{% macro horas(col) -%}
+  case {{ col }} when 'PT15M' then 0.25 when 'PT30M' then 0.5 when 'PT60M' then 1.0 when 'P1D' then 24.0 end
+{%- endmacro %}
